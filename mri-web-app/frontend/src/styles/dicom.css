@@ -1,0 +1,23 @@
+.viewer-container {
+    border: 1px solid #ccc;
+    margin: 20px 0;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  /* 工具栏样式 */
+  .toolbar {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 100;
+    background: rgba(255,255,255,0.8);
+    padding: 5px;
+    border-radius: 3px;
+  }
+  
+  .toolbar button {
+    margin: 0 5px;
+    padding: 3px 8px;
+    cursor: pointer;
+  }
