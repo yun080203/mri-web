@@ -18,6 +18,58 @@ import './styles/App.css';
 // 新增环境变量配置
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
 
+// 创建axios实例
+const axiosInstance = axios.create({
+    baseURL: API_BASE,
+    timeout: 10000,
+    headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+});
+
+// 添加请求拦截器
+axiosInstance.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers['Authorization'] = `Bearer ${token}`;
+        }
+        console.log('发送请求:', {
+            url: config.url,
+            method: config.method,
+            headers: config.headers,
+            data: config.data
+        });
+        return config;
+    },
+    (error) => {
+        console.error('请求错误:', error);
+        return Promise.reject(error);
+    }
+);
+
+// 添加响应拦截器
+axiosInstance.interceptors.response.use(
+    (response) => {
+        console.log('收到响应:', response);
+        return response;
+    },
+    (error) => {
+        console.error('响应错误:', error);
+        if (error.response?.status === 401) {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        }
+        return Promise.reject(error);
+    }
+);
+
+// 配置全局axios默认值
+axios.defaults.baseURL = API_BASE;
+axios.defaults.headers.common['Content-Type'] = 'application/json';
+axios.defaults.headers.common['Accept'] = 'application/json';
+
 // 认证状态管理
 const authReducer = (state, action) => {
     switch (action.type) {
@@ -66,8 +118,12 @@ function MainApp() {
     });
     const [state, dispatch] = useReducer(uploadReducer, initialState);
     const [selectedFile, setSelectedFile] = useState(null);
-    const [previewImage, setPreviewImage] = useState(null);
-    const [processingProgress, setProcessingProgress] = useState(0);
+    const [uploadedImage, setUploadedImage] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [processingStatus, setProcessingStatus] = useState(null);
+    const [matlabLog, setMatlabLog] = useState('');
+    const [processedImages, setProcessedImages] = useState({});
+    const [analysisResults, setAnalysisResults] = useState(null);
     const [patients, setPatients] = useState([]);
     const [selectedPatient, setSelectedPatient] = useState(null);
     const [showPatientModal, setShowPatientModal] = useState(false);
@@ -75,44 +131,26 @@ function MainApp() {
         name: '',
         patient_id: '',
         age: '',
-        gender: ''
+        gender: 'M'
     });
     const cancelTokenSource = useRef(null);
     const navigate = useNavigate();
     const pollInterval = useRef(null);
+    const [previewImage, setPreviewImage] = useState(null);
 
     // 获取患者列表
     useEffect(() => {
         const fetchPatients = async () => {
             try {
-                const token = localStorage.getItem('token');
-                if (!token) {
-                    alert('请先登录');
-                    return;
-                }
-
-                console.log('获取患者列表，请求头:', {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                });
-
-                const response = await axios.get(`${API_BASE}/api/patients`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                if (response.data) {
+                const response = await axiosInstance.get('/api/patients');
+                console.log('获取到的患者列表:', response.data);
+                if (response.data && Array.isArray(response.data.patients)) {
                     setPatients(response.data.patients);
                 }
             } catch (error) {
-                console.error('获取患者列表失败:', error.response?.data || error);
+                console.error('获取患者列表失败:', error);
                 if (error.response?.status === 401) {
-                    localStorage.removeItem('token');
                     navigate('/login');
-                } else {
-                    alert(error.response?.data?.error || '获取患者列表失败，请重试');
                 }
             }
         };
@@ -122,56 +160,85 @@ function MainApp() {
         }
     }, [authState.isAuthenticated, navigate]);
 
+    // 配置axios默认值
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            // 配置axios默认值
+            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            axios.defaults.headers.common['Content-Type'] = 'application/json';
+            axios.defaults.headers.common['Accept'] = 'application/json';
+            axios.defaults.withCredentials = true;  // 允许跨域请求携带凭证
+        }
+    }, []);
+
     // 创建新患者
     const handleCreatePatient = async () => {
         try {
             const token = localStorage.getItem('token');
             if (!token) {
+                console.error('未找到token');
                 alert('请先登录');
+                navigate('/login');
                 return;
             }
 
-            console.log('创建患者数据:', newPatient);
-            console.log('请求头:', {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            });
+            // 验证输入
+            if (!newPatient.name || !newPatient.patient_id || !newPatient.age || !newPatient.gender) {
+                alert('请填写所有必填字段');
+                return;
+            }
 
-            const response = await axios.post(`${API_BASE}/api/patients`, newPatient, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
+            const age = parseInt(newPatient.age, 10);
+            if (isNaN(age) || age <= 0) {
+                alert('请输入有效的年龄');
+                return;
+            }
 
-            if (response.data) {
+            const patientData = {
+                ...newPatient,
+                age: age
+            };
+
+            console.log('正在发送创建患者请求:', patientData);
+
+            const response = await axiosInstance.post('/api/patients', patientData);
+
+            console.log('服务器响应:', response);
+
+            if (response.data && response.data.patient) {
+                alert('患者创建成功');
                 setShowPatientModal(false);
                 setNewPatient({
                     name: '',
                     patient_id: '',
                     age: '',
-                    gender: ''
+                    gender: 'M'
                 });
-                fetchPatients();
+
+                // 将新创建的患者添加到列表中
+                setPatients(prevPatients => [...prevPatients, response.data.patient]);
+            } else {
+                throw new Error('服务器响应格式不正确');
             }
         } catch (error) {
-            console.error('创建患者失败:', error.response?.data || error);
-            if (error.response?.status === 401) {
-                localStorage.removeItem('token');
-                navigate('/login');
-            } else {
-                alert(error.response?.data?.error || '创建患者失败，请重试');
+            console.error('创建患者失败:', error);
+            console.error('错误详情:', {
+                message: error.message,
+                response: error.response,
+                request: error.request
+            });
+            
+            let errorMessage = '创建患者失败，请重试';
+            if (error.response) {
+                errorMessage = error.response.data?.error || error.response.data?.message || errorMessage;
+            } else if (error.request) {
+                errorMessage = '无法连接到服务器，请检查网络连接';
             }
+            
+            alert(errorMessage);
         }
     };
-
-    // 配置axios默认值
-    useEffect(() => {
-        const token = localStorage.getItem('token');
-        if (token) {
-            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        }
-    }, []);
 
     // 清理函数
     const cleanup = () => {
@@ -194,129 +261,181 @@ function MainApp() {
         if (file) {
             setSelectedFile(file);
             // 清除之前的状态
+            setUploadedImage(null);
+            setProcessingStatus(null);
+            setMatlabLog('');
+            setProcessedImages({});
+            setAnalysisResults(null);
             setPreviewImage(null);
-            setProcessingProgress(0);
             dispatch({ type: 'RESET' });
         }
     };
 
-    // 修改handleUpload函数
-    const handleUpload = async () => {
-        if (!selectedFile) {
-            alert('请先选择文件');
-            return;
-        }
-
-        if (!selectedPatient) {
-            alert('请先选择或创建患者');
-            return;
-        }
-
-        // 清理之前的状态
-        cleanup();
-        cancelTokenSource.current = axios.CancelToken.source();
-
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        formData.append('patient_id', selectedPatient.id);
-        
+    // 处理图像上传
+    const handleImageUpload = async (file, patientId) => {
         try {
-            dispatch({ type: 'START_UPLOAD' });
+            setLoading(true);
+            setProcessingStatus('uploading');
             
-            console.log('开始上传文件:', selectedFile.name);
-            const response = await axios.post(`${API_BASE}/api/process`, formData, {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('patient_id', patientId);
+            
+            const response = await axios.post(`${API_BASE}/api/upload`, formData, {
                 headers: {
+                    'Content-Type': 'multipart/form-data',
                     'Authorization': `Bearer ${localStorage.getItem('token')}`
-                },
-                cancelToken: cancelTokenSource.current.token,
-                onUploadProgress: (e) => {
-                    const progress = Math.round((e.loaded * 100) / e.total);
-                    dispatch({ type: 'UPDATE_PROGRESS', payload: progress });
                 }
             });
-
-            console.log('上传响应:', response.data);
             
-            if (response.data.task_id) {
-                dispatch({ type: 'PROCESS_START', payload: response.data.task_id });
-                
-                // 获取图像预览
-                try {
-                    const previewResponse = await axios.get(`${API_BASE}/api/preview/${selectedFile.name}`, {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
-                    });
-                    if (previewResponse.data.status === 'success') {
-                        setPreviewImage(`data:image/png;base64,${previewResponse.data.image}`);
-                    }
-                } catch (error) {
-                    console.error('获取预览失败:', error);
-                }
-
-                // 开始轮询进度
-                const pollProgress = async () => {
-                    try {
-                        // 获取处理进度
-                        const progressResponse = await axios.get(`${API_BASE}/api/tasks/${response.data.task_id}/progress`);
-                        console.log('进度响应:', progressResponse.data);
-                        
-                        if (progressResponse.data.status === 'success') {
-                            setProcessingProgress(progressResponse.data.progress);
-                            
-                            // 检查任务状态
-                            const statusResponse = await axios.get(`${API_BASE}/api/tasks/${response.data.task_id}`);
-                            console.log('状态响应:', statusResponse.data);
-                            
-                            if (statusResponse.data.status === 'completed') {
-                                dispatch({ type: 'SUCCESS', payload: statusResponse.data.results });
-                                
-                                // 获取处理后的图像
-                                try {
-                                    const processedImageResponse = await axios.get(`${API_BASE}/api/processed/${response.data.task_id}/segmented.nii.gz`);
-                                    if (processedImageResponse.data.status === 'success') {
-                                        setPreviewImage(`data:image/png;base64,${processedImageResponse.data.image}`);
-                                    }
-                                } catch (error) {
-                                    console.error('获取处理后图像失败:', error);
-                                }
-                                
-                                // 获取分析结果
-                                try {
-                                    const resultsResponse = await axios.get(`${API_BASE}/api/results/${response.data.task_id}`);
-                                    if (resultsResponse.data.status === 'success') {
-                                        dispatch({ type: 'SUCCESS', payload: resultsResponse.data.results });
-                                    }
-                                } catch (error) {
-                                    console.error('获取分析结果失败:', error);
-                                }
-                                
-                                cleanup();  // 停止轮询
-                            } else if (statusResponse.data.status === 'failed') {
-                                throw new Error(statusResponse.data.error || '处理失败');
-                            } else {
-                                // 继续轮询
-                                pollInterval.current = setTimeout(pollProgress, 2000);
-                            }
-                        }
-                    } catch (error) {
-                        console.error('轮询错误:', error);
-                        dispatch({ type: 'ERROR', payload: error.message });
-                        cleanup();  // 停止轮询
-                    }
-                };
-
-                // 开始首次轮询
-                pollProgress();
+            if (response.data.status === 'success') {
+                setProcessingStatus('uploaded');
+                await startProcessing(response.data.file_info.id);
             }
         } catch (error) {
-            if (axios.isCancel(error)) {
-                console.log('上传已取消');
-                return;
-            }
             console.error('上传失败:', error);
-            dispatch({ type: 'ERROR', payload: error.message });
+            setProcessingStatus('error');
+        } finally {
+            setLoading(false);
         }
+    };
+
+    // 开始处理图像
+    const startProcessing = async (imageId) => {
+        try {
+            setProcessingStatus('processing');
+            const response = await axios.post(`${API_BASE}/api/process/${imageId}`, {}, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            });
+            
+            if (response.data.task_id) {
+                await pollTaskStatus(response.data.task_id);
+            }
+        } catch (error) {
+            console.error('处理失败:', error);
+            setProcessingStatus('error');
+        }
+    };
+
+    // 轮询任务状态
+    const pollTaskStatus = async (taskId) => {
+        try {
+            const interval = setInterval(async () => {
+                const response = await axios.get(`${API_BASE}/api/tasks/${taskId}`);
+                const { status, progress, results, matlab_log } = response.data;
+                
+                setMatlabLog(matlab_log || '');
+                
+                if (status === 'completed') {
+                    clearInterval(interval);
+                    setProcessingStatus('completed');
+                    setAnalysisResults(results);
+                    await loadProcessedImages(taskId);
+                } else if (status === 'failed') {
+                    clearInterval(interval);
+                    setProcessingStatus('failed');
+                }
+            }, 2000);
+        } catch (error) {
+            console.error('获取任务状态失败:', error);
+            setProcessingStatus('error');
+        }
+    };
+
+    // 加载处理后的图像
+    const loadProcessedImages = async (taskId) => {
+        try {
+            const images = ['p1input.nii', 'p2input.nii', 'p3input.nii'];
+            const loadedImages = {};
+            
+            for (const img of images) {
+                const response = await axios.get(`${API_BASE}/api/processed/${taskId}/${img}`);
+                if (response.data.status === 'success') {
+                    loadedImages[img] = response.data.image;
+                }
+            }
+            
+            setProcessedImages(loadedImages);
+        } catch (error) {
+            console.error('加载处理后的图像失败:', error);
+        }
+    };
+
+    // 渲染处理按钮
+    const renderProcessButton = () => {
+        if (!uploadedImage) return null;
+
+        switch (processingStatus) {
+            case 'processing':
+                return (
+                    <button type="button" disabled>
+                        正在处理...
+                    </button>
+                );
+            case 'completed':
+                return (
+                    <button type="button" disabled>
+                        处理完成
+                    </button>
+                );
+            case 'failed':
+                return (
+                    <button 
+                        type="button" 
+                        className="error-button"
+                        onClick={() => startProcessing(uploadedImage.id)}
+                    >
+                        重试处理
+                    </button>
+                );
+            default:
+                return (
+                    <button 
+                        type="button"
+                        onClick={() => startProcessing(uploadedImage.id)}
+                    >
+                        开始处理
+                    </button>
+                );
+        }
+    };
+
+    // 渲染MATLAB日志
+    const renderMatlabLog = () => {
+        if (!matlabLog) return null;
+        return (
+            <div style={{ marginTop: 16 }}>
+                <h4>处理日志</h4>
+                <pre style={{ maxHeight: 200, overflow: 'auto', backgroundColor: '#f5f5f5', padding: 8 }}>
+                    {matlabLog}
+                </pre>
+            </div>
+        );
+    };
+
+    // 渲染分析结果
+    const renderAnalysisResults = () => {
+        if (!analysisResults) return null;
+        return (
+            <div style={{ marginTop: 16 }}>
+                <h4>分析结果</h4>
+                <Table
+                    dataSource={[
+                        { key: 'gm', name: '灰质体积', value: `${(analysisResults.gm_volume / 1000).toFixed(2)} ml` },
+                        { key: 'wm', name: '白质体积', value: `${(analysisResults.wm_volume / 1000).toFixed(2)} ml` },
+                        { key: 'csf', name: '脑脊液体积', value: `${(analysisResults.csf_volume / 1000).toFixed(2)} ml` },
+                        { key: 'tiv', name: '颅内总体积', value: `${(analysisResults.tiv / 1000).toFixed(2)} ml` }
+                    ]}
+                    columns={[
+                        { title: '指标', dataIndex: 'name', key: 'name' },
+                        { title: '数值', dataIndex: 'value', key: 'value' }
+                    ]}
+                    pagination={false}
+                />
+            </div>
+        );
     };
 
     // 受保护的路由组件
@@ -399,20 +518,36 @@ function MainApp() {
                                     <h2>选择患者</h2>
                                     <div className="patient-selector">
                                         <select
-                                            value={selectedPatient?.id || ''}
+                                            value={selectedPatient ? selectedPatient.id : ''}
                                             onChange={(e) => {
-                                                const patient = patients.find(p => p.id === parseInt(e.target.value));
+                                                const patientId = parseInt(e.target.value, 10);
+                                                const patient = patients.find(p => p.id === patientId);
                                                 setSelectedPatient(patient);
+                                                // 清除之前的状态
+                                                setSelectedFile(null);
+                                                setUploadedImage(null);
+                                                setProcessingStatus(null);
+                                                setMatlabLog('');
+                                                setProcessedImages({});
+                                                setAnalysisResults(null);
+                                                setPreviewImage(null);
                                             }}
                                         >
                                             <option value="">请选择患者</option>
                                             {patients.map(patient => (
                                                 <option key={patient.id} value={patient.id}>
-                                                    {patient.name} ({patient.patient_id})
+                                                    {patient.name} (ID: {patient.patient_id})
                                                 </option>
                                             ))}
                                         </select>
-                                        <button onClick={() => setShowPatientModal(true)}>
+                                        <button 
+                                            type="button"
+                                            onClick={() => {
+                                                setShowPatientModal(true);
+                                                setLoading(false); // 确保加载状态被重置
+                                            }}
+                                            className="add-patient-btn"
+                                        >
                                             添加新患者
                                         </button>
                                     </div>
@@ -426,7 +561,11 @@ function MainApp() {
                                             disabled={!selectedPatient}
                                         />
                                         <button
-                                            onClick={handleUpload}
+                                            onClick={() => {
+                                                if (selectedFile) {
+                                                    handleImageUpload(selectedFile, selectedPatient.id);
+                                                }
+                                            }}
                                             disabled={!selectedFile || !selectedPatient || state.status === 'uploading' || state.status === 'processing'}
                                         >
                                             {state.status === 'uploading' ? '上传中...' : 
@@ -447,38 +586,46 @@ function MainApp() {
                                 {state.status === 'processing' && (
                                     <div className="progress-section">
                                         <div className="progress-bar">
-                                            <div className="progress" style={{ width: `${processingProgress}%` }}></div>
+                                            <div className="progress" style={{ width: `${processingStatus === 'processing' ? state.progress : 0}%` }}></div>
                                         </div>
-                                        <div className="progress-text">处理进度: {processingProgress}%</div>
+                                        <div className="progress-text">处理进度: {processingStatus === 'processing' ? state.progress : 0}%</div>
                                     </div>
                                 )}
 
                                 {previewImage && (
                                     <div className="preview-section">
-                                        <h3>原始图像</h3>
-                                        <img src={previewImage} alt="原始DICOM预览" className="preview-image" />
+                                        <h3>图像预览</h3>
+                                        <img src={previewImage} alt="图像预览" className="preview-image" />
                                     </div>
                                 )}
+
+                                {renderProcessButton()}
+                                {renderMatlabLog()}
+                                {renderAnalysisResults()}
 
                                 {state.result && (
                                     <div className="analysis-section">
                                         <h3>分析结果</h3>
                                         <div className="results-grid">
                                             <div className="result-item">
-                                                <h4>灰质体积</h4>
-                                                <p>{state.result.gm_volume.toFixed(2)} mm³</p>
+                                                <h4>图像尺寸</h4>
+                                                <p>{state.result.image_size ? `${state.result.image_size[0]} x ${state.result.image_size[1]}` : 'N/A'}</p>
                                             </div>
                                             <div className="result-item">
-                                                <h4>白质体积</h4>
-                                                <p>{state.result.wm_volume.toFixed(2)} mm³</p>
+                                                <h4>平均强度</h4>
+                                                <p>{state.result.mean_intensity ? state.result.mean_intensity.toFixed(2) : 'N/A'}</p>
                                             </div>
                                             <div className="result-item">
-                                                <h4>脑脊液体积</h4>
-                                                <p>{state.result.csf_volume.toFixed(2)} mm³</p>
+                                                <h4>最大强度</h4>
+                                                <p>{state.result.max_intensity ? state.result.max_intensity.toFixed(2) : 'N/A'}</p>
                                             </div>
                                             <div className="result-item">
-                                                <h4>总颅内体积</h4>
-                                                <p>{state.result.tiv.toFixed(2)} mm³</p>
+                                                <h4>最小强度</h4>
+                                                <p>{state.result.min_intensity ? state.result.min_intensity.toFixed(2) : 'N/A'}</p>
+                                            </div>
+                                            <div className="result-item">
+                                                <h4>病灶体积</h4>
+                                                <p>{state.result.lesion_volume ? state.result.lesion_volume.toFixed(2) : 'N/A'} 像素</p>
                                             </div>
                                         </div>
                                     </div>
@@ -539,6 +686,7 @@ function MainApp() {
                                 type="text"
                                 value={newPatient.name}
                                 onChange={(e) => setNewPatient({...newPatient, name: e.target.value})}
+                                placeholder="请输入患者姓名"
                             />
                         </div>
                         <div className="form-group">
@@ -547,6 +695,7 @@ function MainApp() {
                                 type="text"
                                 value={newPatient.patient_id}
                                 onChange={(e) => setNewPatient({...newPatient, patient_id: e.target.value})}
+                                placeholder="请输入患者ID"
                             />
                         </div>
                         <div className="form-group">
@@ -555,6 +704,8 @@ function MainApp() {
                                 type="number"
                                 value={newPatient.age}
                                 onChange={(e) => setNewPatient({...newPatient, age: e.target.value})}
+                                placeholder="请输入年龄"
+                                min="1"
                             />
                         </div>
                         <div className="form-group">
@@ -563,15 +714,75 @@ function MainApp() {
                                 value={newPatient.gender}
                                 onChange={(e) => setNewPatient({...newPatient, gender: e.target.value})}
                             >
-                                <option value="">请选择</option>
+                                <option value="">请选择性别</option>
                                 <option value="M">男</option>
                                 <option value="F">女</option>
                             </select>
                         </div>
                         <div className="modal-buttons">
-                            <button onClick={handleCreatePatient}>创建</button>
-                            <button onClick={() => setShowPatientModal(false)}>取消</button>
+                            <button type="button" onClick={handleCreatePatient}>创建</button>
+                            <button type="button" onClick={() => setShowPatientModal(false)}>取消</button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 处理状态显示 */}
+            {processingStatus && (
+                <div className={`status-message ${processingStatus}`}>
+                    {processingStatus === 'uploading' && '正在上传图像...'}
+                    {processingStatus === 'uploaded' && '图像上传成功，开始处理...'}
+                    {processingStatus === 'processing' && '正在处理图像...'}
+                    {processingStatus === 'completed' && '处理完成'}
+                    {processingStatus === 'failed' && '处理失败'}
+                    {processingStatus === 'error' && '发生错误'}
+                </div>
+            )}
+            
+            {/* MATLAB日志显示 */}
+            {matlabLog && (
+                <div className="matlab-log">
+                    <h3>处理日志</h3>
+                    <pre>{matlabLog}</pre>
+                </div>
+            )}
+            
+            {/* 处理结果显示 */}
+            {processingStatus === 'completed' && analysisResults && (
+                <div className="analysis-results">
+                    <h3>分析结果</h3>
+                    <div className="results-grid">
+                        <div className="result-item">
+                            <label>灰质体积:</label>
+                            <span>{(analysisResults.gm_volume / 1000).toFixed(2)} ml</span>
+                        </div>
+                        <div className="result-item">
+                            <label>白质体积:</label>
+                            <span>{(analysisResults.wm_volume / 1000).toFixed(2)} ml</span>
+                        </div>
+                        <div className="result-item">
+                            <label>脑脊液体积:</label>
+                            <span>{(analysisResults.csf_volume / 1000).toFixed(2)} ml</span>
+                        </div>
+                        <div className="result-item">
+                            <label>颅内总体积:</label>
+                            <span>{(analysisResults.tiv / 1000).toFixed(2)} ml</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* 处理后的图像显示 */}
+            {processingStatus === 'completed' && Object.keys(processedImages).length > 0 && (
+                <div className="processed-images">
+                    <h3>处理后的图像</h3>
+                    <div className="images-grid">
+                        {Object.entries(processedImages).map(([name, base64]) => (
+                            <div key={name} className="image-item">
+                                <h4>{name === 'p1input.nii' ? '灰质' : name === 'p2input.nii' ? '白质' : '脑脊液'}</h4>
+                                <img src={`data:image/png;base64,${base64}`} alt={name} />
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}

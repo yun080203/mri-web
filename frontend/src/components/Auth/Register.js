@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import '../../styles/Auth.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
@@ -8,52 +8,44 @@ const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
 function Register() {
     const [formData, setFormData] = useState({
         username: '',
-        email: '',
         password: '',
         confirmPassword: ''
     });
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
-
-    const handleChange = (e) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value
-        });
-    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
 
+        // 验证密码
         if (formData.password !== formData.confirmPassword) {
             setError('两次输入的密码不一致');
             return;
         }
 
-        try {
-            console.log('正在发送注册请求到:', `${API_BASE}/api/register`);
-            console.log('注册数据:', {
-                username: formData.username,
-                email: formData.email,
-                password: formData.password
-            });
-            
-            const response = await axios.post(`${API_BASE}/api/register`, {
-                username: formData.username,
-                email: formData.email,
-                password: formData.password
-            });
+        setLoading(true);
 
+        try {
+            console.log('尝试注册:', formData.username);
+            const response = await axios.post(`${API_BASE}/api/auth/register`, {
+                username: formData.username,
+                password: formData.password
+            });
             console.log('注册响应:', response.data);
 
-            if (response.data.message) {
+            if (response.data.success) {
+                alert('注册成功！请登录');
                 navigate('/login');
+            } else {
+                setError('注册失败：' + (response.data.error || '未知错误'));
             }
         } catch (error) {
-            console.error('注册错误:', error);
-            console.error('错误响应:', error.response?.data);
+            console.error('注册错误:', error.response?.data || error);
             setError(error.response?.data?.error || '注册失败，请重试');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -64,54 +56,39 @@ function Register() {
                 {error && <div className="error-message">{error}</div>}
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
-                        <label htmlFor="username">用户名</label>
+                        <label>用户名</label>
                         <input
                             type="text"
-                            id="username"
-                            name="username"
                             value={formData.username}
-                            onChange={handleChange}
+                            onChange={(e) => setFormData({...formData, username: e.target.value})}
                             required
                         />
                     </div>
                     <div className="form-group">
-                        <label htmlFor="email">邮箱</label>
-                        <input
-                            type="email"
-                            id="email"
-                            name="email"
-                            value={formData.email}
-                            onChange={handleChange}
-                            required
-                        />
-                    </div>
-                    <div className="form-group">
-                        <label htmlFor="password">密码</label>
+                        <label>密码</label>
                         <input
                             type="password"
-                            id="password"
-                            name="password"
                             value={formData.password}
-                            onChange={handleChange}
+                            onChange={(e) => setFormData({...formData, password: e.target.value})}
                             required
                         />
                     </div>
                     <div className="form-group">
-                        <label htmlFor="confirmPassword">确认密码</label>
+                        <label>确认密码</label>
                         <input
                             type="password"
-                            id="confirmPassword"
-                            name="confirmPassword"
                             value={formData.confirmPassword}
-                            onChange={handleChange}
+                            onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
                             required
                         />
                     </div>
-                    <button type="submit">注册</button>
+                    <button type="submit" disabled={loading}>
+                        {loading ? '注册中...' : '注册'}
+                    </button>
                 </form>
-                <div className="auth-links">
-                    <p>已有账号？ <Link to="/login">立即登录</Link></p>
-                </div>
+                <p className="auth-link">
+                    已有账号？ <Link to="/login">立即登录</Link>
+                </p>
             </div>
         </div>
     );
