@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/processed:/app/processed
+      - ./backend/reports:/app/reports
+      - ./backend/logs:/app/logs
+    environment:
+      - FLASK_APP=run.py
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1 

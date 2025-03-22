@@ -1,0 +1,254 @@
+.patient-list-container {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.patient-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.search-box input {
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    width: 300px;
+    font-size: 1rem;
+}
+
+.patient-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.patient-card {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.patient-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.patient-card h3 {
+    color: #2c3e50;
+    margin-bottom: 1rem;
+    font-size: 1.25rem;
+}
+
+.patient-info {
+    margin-bottom: 1.5rem;
+}
+
+.patient-info p {
+    margin: 0.5rem 0;
+    color: #666;
+}
+
+.patient-info strong {
+    color: #2c3e50;
+}
+
+.patient-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+.view-button,
+.upload-button {
+    flex: 1;
+    padding: 0.5rem;
+    text-align: center;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: 500;
+    transition: background-color 0.3s;
+}
+
+.view-button {
+    background-color: #3498db;
+    color: white;
+}
+
+.upload-button {
+    background-color: #2ecc71;
+    color: white;
+}
+
+.view-button:hover {
+    background-color: #2980b9;
+}
+
+.upload-button:hover {
+    background-color: #27ae60;
+}
+
+.add-patient-section {
+    text-align: center;
+    margin-top: 2rem;
+}
+
+.add-patient-button {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    background-color: #2ecc71;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    font-weight: 500;
+    transition: background-color 0.3s;
+}
+
+.add-patient-button:hover {
+    background-color: #27ae60;
+}
+
+/* 患者详情页面样式 */
+.patient-detail-container {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.patient-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.back-button {
+    padding: 0.5rem 1rem;
+    background-color: #95a5a6;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    margin-right: 1rem;
+}
+
+.back-button:hover {
+    background-color: #7f8c8d;
+}
+
+.patient-info-section {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-item label {
+    color: #666;
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+}
+
+.info-item span {
+    color: #2c3e50;
+    font-weight: 500;
+}
+
+.patient-images-section {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+}
+
+.images-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1rem;
+}
+
+.image-card {
+    background: #f8f9fa;
+    border-radius: 4px;
+    padding: 1rem;
+}
+
+.image-info {
+    margin-bottom: 1rem;
+}
+
+.image-info p {
+    margin: 0.5rem 0;
+    color: #666;
+}
+
+.image-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.data-button {
+    flex: 1;
+    padding: 0.5rem;
+    background-color: #f1c40f;
+    color: white;
+    text-align: center;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: 500;
+    transition: background-color 0.3s;
+}
+
+.data-button:hover {
+    background-color: #f39c12;
+}
+
+.no-data {
+    text-align: center;
+    color: #666;
+    padding: 2rem;
+}
+
+.loading {
+    text-align: center;
+    padding: 2rem;
+    color: #666;
+}
+
+@media (max-width: 768px) {
+    .patient-list-header {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .search-box input {
+        width: 100%;
+    }
+
+    .patient-actions {
+        flex-direction: column;
+    }
+
+    .patient-detail-header {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+    }
+} 
