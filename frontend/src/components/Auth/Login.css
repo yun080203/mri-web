@@ -103,4 +103,20 @@ button:disabled {
     to {
         transform: rotate(1turn);
     }
+}
+
+.auth-link {
+    text-align: center;
+    margin-top: 1rem;
+    color: #666;
+}
+
+.auth-link a {
+    color: #4a90e2;
+    text-decoration: none;
+    margin-left: 0.5rem;
+}
+
+.auth-link a:hover {
+    text-decoration: underline;
 } 

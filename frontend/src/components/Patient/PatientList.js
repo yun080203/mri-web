@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import '../../styles/Patient.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
@@ -10,6 +10,7 @@ function PatientList() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+    const navigate = useNavigate();
 
     useEffect(() => {
         fetchPatients();
@@ -17,12 +18,31 @@ function PatientList() {
 
     const fetchPatients = async () => {
         try {
-            const response = await axios.get(`${API_BASE}/api/patients`);
-            setPatients(response.data.patients);
+            const token = localStorage.getItem('token');
+            if (!token) {
+                navigate('/login');
+                return;
+            }
+
+            const response = await axios.get(`${API_BASE}/api/patients`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });
+
+            if (response.data && Array.isArray(response.data.patients)) {
+                setPatients(response.data.patients);
+            }
             setLoading(false);
         } catch (error) {
+            console.error('获取患者列表失败:', error);
             setError('获取患者列表失败');
             setLoading(false);
+            if (error.response?.status === 401) {
+                navigate('/login');
+            }
         }
     };
 

@@ -28,6 +28,14 @@ class Config:
     # 安全配置
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-key-please-change-in-production'
     
+    # JWT配置
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'jwt-secret-key-please-change-in-production'
+    JWT_ACCESS_TOKEN_EXPIRES = 3600  # token过期时间：1小时
+    JWT_TOKEN_LOCATION = ["headers"]
+    JWT_HEADER_NAME = "Authorization"
+    JWT_HEADER_TYPE = "Bearer"
+    JWT_IDENTITY_CLAIM = "sub"
+    
     # CORS配置
     CORS_ORIGINS = ['*']
     CORS_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']

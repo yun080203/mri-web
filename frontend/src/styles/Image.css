@@ -1,0 +1,311 @@
+/* 图像处理容器 */
+.image-processing {
+    padding: 20px;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* 图像上传区域 */
+.image-upload {
+    padding: 20px;
+    border: 2px dashed #ccc;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    background-color: #f9f9f9;
+}
+
+.upload-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.upload-controls input[type="file"] {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: white;
+}
+
+.upload-controls button,
+.processing-controls button {
+    padding: 8px 20px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.upload-controls button:hover:not(:disabled),
+.processing-controls button:hover:not(:disabled) {
+    background-color: #45a049;
+}
+
+.upload-controls button:disabled,
+.processing-controls button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+/* 图像预览区域 */
+.preview-section {
+    margin: 20px 0;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.preview-section h3 {
+    padding: 15px 20px;
+    margin: 0;
+    border-bottom: 1px solid #eee;
+    color: #333;
+    font-size: 18px;
+    background-color: #f8f9fa;
+}
+
+.preview-container {
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #fafafa;
+    min-height: 400px;
+}
+
+.preview-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 800px;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    padding: 10px;
+}
+
+.preview-image {
+    width: 100%;
+    height: auto;
+    max-height: 600px;
+    object-fit: contain;
+    border-radius: 4px;
+}
+
+/* 处理控制区域 */
+.processing-controls {
+    margin: 20px 0;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.process-button {
+    padding: 10px 30px;
+    font-size: 16px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.process-button:hover:not(:disabled) {
+    background-color: #45a049;
+    transform: translateY(-1px);
+}
+
+.process-button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+/* MATLAB日志区域 */
+.matlab-log {
+    margin: 20px 0;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.matlab-log h4 {
+    padding: 15px 20px;
+    margin: 0;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #eee;
+    color: #333;
+    font-size: 18px;
+}
+
+.matlab-log pre {
+    margin: 0;
+    padding: 20px;
+    background-color: #2b2b2b;
+    color: #f8f8f2;
+    font-family: 'Consolas', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* 状态消息 */
+.status-message {
+    margin: 20px 0;
+    padding: 15px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.status-message.uploading {
+    background-color: #e3f2fd;
+    border: 1px solid #bbdefb;
+    color: #1976d2;
+}
+
+.status-message.uploaded {
+    background-color: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    color: #424242;
+}
+
+.status-message.processing {
+    background-color: #fff3e0;
+    border: 1px solid #ffe0b2;
+    color: #e65100;
+}
+
+.status-message.completed {
+    background-color: #e8f5e9;
+    border: 1px solid #c8e6c9;
+    color: #2e7d32;
+}
+
+.status-message.failed,
+.status-message.error {
+    background-color: #ffebee;
+    border: 1px solid #ffcdd2;
+    color: #c62828;
+}
+
+/* 加载状态 */
+.image-loading {
+    padding: 40px;
+    text-align: center;
+}
+
+.image-loading .spinner {
+    margin-bottom: 15px;
+}
+
+.image-loading p {
+    color: #666;
+    margin: 0;
+}
+
+/* 预览错误 */
+.preview-error {
+    padding: 20px;
+    text-align: center;
+    color: #c62828;
+    background-color: #ffebee;
+    border-radius: 4px;
+}
+
+/* 分析结果区域 */
+.analysis-results {
+    margin: 20px 0;
+    padding: 20px;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.volume-results {
+    margin: 15px 0;
+}
+
+.results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+}
+
+.result-item {
+    padding: 10px;
+    background-color: #f5f5f5;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.result-item label {
+    font-weight: bold;
+    color: #333;
+}
+
+/* 处理后的图像网格 */
+.processed-images {
+    margin-top: 20px;
+}
+
+.images-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-top: 15px;
+}
+
+.image-item {
+    text-align: center;
+}
+
+.image-item h5 {
+    margin: 0 0 10px 0;
+    color: #333;
+}
+
+.image-item img {
+    max-width: 100%;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+/* 错误消息 */
+.error-message {
+    padding: 10px;
+    background-color: #ffebee;
+    border: 1px solid #ffcdd2;
+    color: #c62828;
+    border-radius: 4px;
+    margin: 10px 0;
+}
+
+/* 加载动画 */
+.spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #4CAF50;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+} 

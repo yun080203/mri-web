@@ -1,115 +1,147 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import './Login.css';
+import { useNavigate, Link } from 'react-router-dom';
+import { axiosInstance } from '../../App';  // 导入配置好的 axiosInstance
+import './Auth.css';
 
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
-
-function Login({ onLogin }) {
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
+const Login = ({ onLogin }) => {
+    const [formData, setFormData] = useState({
+        username: '',
+        email: '',
+        password: ''
+    });
+    const [loginMethod, setLoginMethod] = useState('username'); // 'username' or 'email'
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+
+    const handleChange = (e) => {
+        setFormData({
+            ...formData,
+            [e.target.name]: e.target.value
+        });
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setLoading(true);
         setError('');
+        setLoading(true);
 
         try {
             console.log('尝试登录:', {
-                url: `${API_BASE}/api/auth/login`,
-                data: { username, password }
-            });
-
-            // 创建axios实例
-            const loginAxios = axios.create({
-                baseURL: API_BASE,
-                timeout: 5000, // 减少超时时间到5秒
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
+                url: '/api/auth/login',
+                data: {
+                    ...(loginMethod === 'username' ? { username: formData.username } : { email: formData.email }),
+                    password: formData.password
                 }
             });
 
-            const response = await loginAxios.post('/api/auth/login', {
-                username,
-                password
+            const response = await axiosInstance.post('/api/auth/login', {
+                ...(loginMethod === 'username' ? { username: formData.username } : { email: formData.email }),
+                password: formData.password
             });
-
-            console.log('登录响应:', response);
-
-            if (response.data.token) {
+            
+            if (response.data.success) {
                 localStorage.setItem('token', response.data.token);
-                onLogin(response.data.user);
+                if (onLogin) {
+                    onLogin(response.data.user);
+                }
                 navigate('/');
             } else {
-                throw new Error('登录响应中没有token');
+                throw new Error(response.data.error || '登录失败');
             }
         } catch (error) {
             console.error('登录失败:', error);
+            
             let errorMessage = '登录失败，请重试';
             
-            if (error.response) {
-                console.error('错误响应:', error.response);
-                errorMessage = error.response.data?.error || errorMessage;
-            } else if (error.code === 'ECONNABORTED') {
-                console.error('请求超时');
-                errorMessage = '服务器响应超时，请检查后端服务是否正常运行';
+            if (error.code === 'ECONNABORTED') {
+                errorMessage = '请求超时，请检查网络连接或稍后重试';
+            } else if (error.response) {
+                errorMessage = error.response.data?.error || '用户名或密码错误';
             } else if (error.request) {
-                console.error('未收到响应:', error.request);
-                errorMessage = '无法连接到服务器，请检查网络连接和后端服务';
-            } else {
-                console.error('请求错误:', error.message);
-                errorMessage = error.message;
+                errorMessage = '无法连接到服务器，请检查网络连接';
             }
             
             setError(errorMessage);
+            console.error('错误详情:', {
+                code: error.code,
+                message: error.message,
+                response: error.response?.data
+            });
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="login-container">
-            <div className="login-box">
+        <div className="auth-container">
+            <div className="auth-box">
                 <h2>登录</h2>
+                <div className="login-method-selector">
+                    <button
+                        type="button"
+                        className={loginMethod === 'username' ? 'active' : ''}
+                        onClick={() => setLoginMethod('username')}
+                    >
+                        使用用户名
+                    </button>
+                    <button
+                        type="button"
+                        className={loginMethod === 'email' ? 'active' : ''}
+                        onClick={() => setLoginMethod('email')}
+                    >
+                        使用邮箱
+                    </button>
+                </div>
                 <form onSubmit={handleSubmit}>
-                    <div className="form-group">
-                        <label>用户名</label>
-                        <input
-                            type="text"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            placeholder="请输入用户名"
-                            required
-                            disabled={loading}
-                        />
-                    </div>
+                    {loginMethod === 'username' ? (
+                        <div className="form-group">
+                            <label>用户名</label>
+                            <input
+                                type="text"
+                                name="username"
+                                value={formData.username}
+                                onChange={handleChange}
+                                required
+                            />
+                        </div>
+                    ) : (
+                        <div className="form-group">
+                            <label>邮箱</label>
+                            <input
+                                type="email"
+                                name="email"
+                                value={formData.email}
+                                onChange={handleChange}
+                                required
+                            />
+                        </div>
+                    )}
                     <div className="form-group">
                         <label>密码</label>
                         <input
                             type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="请输入密码"
+                            name="password"
+                            value={formData.password}
+                            onChange={handleChange}
                             required
-                            disabled={loading}
                         />
                     </div>
                     {error && <div className="error-message">{error}</div>}
                     <button 
                         type="submit" 
+                        className={`auth-button ${loading ? 'loading' : ''}`}
                         disabled={loading}
-                        className={loading ? 'loading' : ''}
                     >
                         {loading ? '登录中...' : '登录'}
                     </button>
                 </form>
+                <p className="auth-link">
+                    还没有账号？ <Link to="/register">立即注册</Link>
+                </p>
             </div>
         </div>
     );
-}
+};
 
 export default Login; 
