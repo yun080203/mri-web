@@ -9,7 +9,7 @@ import Login from './components/Auth/Login';
 import Register from './components/Auth/Register';
 import PatientList from './components/Patient/PatientList';
 import PatientDetail from './components/Patient/PatientDetail';
-import ImageUpload from './components/ImageUpload';
+import ImageUpload from './components/ImageUpload/ImageUpload';
 import './styles/dicom.css';
 import './styles/App.css';
 import './styles/Image.css';

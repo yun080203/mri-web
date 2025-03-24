@@ -3,9 +3,9 @@ import { useDispatch, useSelector } from 'react-redux';
 import { UPLOAD_ACTIONS } from '../../store/reducers/uploadReducer';
 import { imageAPI } from '../../services/api';
 import { ERROR_MESSAGES, POLLING_INTERVAL } from '../../utils/constants';
+import ImageUpload from '../ImageUpload/ImageUpload';
 // 临时注释掉可能未使用的组件引用
 /*
-import ImageUpload from './ImageUpload';
 import ImagePreview from './ImagePreview';
 import ProcessingStatus from './ProcessingStatus';
 import AnalysisResults from './AnalysisResults';
