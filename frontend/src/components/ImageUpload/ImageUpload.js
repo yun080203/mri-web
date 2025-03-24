@@ -53,7 +53,7 @@ const compressImage = async (file) => {
 const ALLOWED_EXTENSIONS = ['.dcm', '.nii', '.nii.gz'];
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
-const ImageUpload = () => {
+const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect }) => {
   const [fileList, setFileList] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -61,7 +61,6 @@ const ImageUpload = () => {
   const [uploadedImageId, setUploadedImageId] = useState(null);
   const [progress, setProgress] = useState(0);
   const [processingLogs, setProcessingLogs] = useState([]);
-  const [selectedPatient, setSelectedPatient] = useState(null);
   const [patients, setPatients] = useState([]);
   const [imageLoading, setImageLoading] = useState(false);
   const [showPatientModal, setShowPatientModal] = useState(false);
@@ -69,8 +68,10 @@ const ImageUpload = () => {
 
   // 获取患者列表
   useEffect(() => {
-    fetchPatients();
-  }, []);
+    if (!hidePatientSelect) {
+      fetchPatients();
+    }
+  }, [hidePatientSelect]);
 
   const fetchPatients = async () => {
     try {
@@ -99,7 +100,7 @@ const ImageUpload = () => {
         setShowPatientModal(false);
         form.resetFields();
         fetchPatients();
-        setSelectedPatient(response.data.patient.id);
+        form.setFieldsValue({ patient: response.data.patient.id });
       }
     } catch (error) {
       message.error('创建患者失败');
@@ -108,7 +109,8 @@ const ImageUpload = () => {
   };
 
   const handleUpload = async () => {
-    if (!selectedPatient) {
+    const patientId = selectedPatient || form.getFieldValue('patient');
+    if (!patientId) {
       message.error('请先选择患者');
       return;
     }
@@ -119,7 +121,7 @@ const ImageUpload = () => {
     try {
       const formData = new FormData();
       formData.append('file', fileList[0]);
-      formData.append('patient_id', selectedPatient);
+      formData.append('patient_id', patientId);
 
       const response = await axiosInstance.post('/api/upload', formData, {
         headers: {
@@ -134,6 +136,9 @@ const ImageUpload = () => {
       if (response.data.status === 'success') {
         setUploadedImageId(response.data.file_info.id);
         message.success('上传成功');
+        if (onUploadSuccess) {
+          onUploadSuccess(response.data.file_info);
+        }
         fetchPreviewImage(response.data.file_info.filename);
       }
     } catch (error) {
@@ -248,11 +253,45 @@ const ImageUpload = () => {
       const newFileList = fileList.slice();
       newFileList.splice(index, 1);
       setFileList(newFileList);
+      setPreviewImage(null);
     },
-    beforeUpload: file => {
+    beforeUpload: async file => {
       if (!validateFile(file)) {
         return false;
       }
+      
+      // 如果是图像文件，直接预览
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setPreviewImage(e.target.result);
+          setImageLoading(false);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        // 对于DICOM或NIfTI文件，发送到服务器生成预览
+        setImageLoading(true);
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          const response = await axios.post(`${API_BASE}/api/preview`, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+          });
+
+          if (response.data.status === 'success') {
+            setPreviewImage(`data:image/png;base64,${response.data.image}`);
+          }
+        } catch (error) {
+          console.error('预览生成失败:', error);
+          message.error('无法生成预览图');
+        } finally {
+          setImageLoading(false);
+        }
+      }
+      
       setFileList([file]);
       return false;
     },
@@ -261,14 +300,14 @@ const ImageUpload = () => {
   };
 
   return (
-    <div className="image-upload-container">
-      <Card title="图像上传与处理">
-        <Space direction="vertical" style={{ width: '100%' }}>
+    <Card title="图像上传与处理" className="image-upload-container">
+      <Space direction="vertical" style={{ width: '100%' }}>
+        {!hidePatientSelect && (
           <div className="patient-selector">
             <Select
               style={{ width: '100%' }}
               placeholder="请选择患者"
-              onChange={setSelectedPatient}
+              onChange={value => form.setFieldsValue({ patient: value })}
               options={patients.map(p => ({ label: p.name, value: p.id }))}
             />
             <Button 
@@ -279,82 +318,81 @@ const ImageUpload = () => {
               新建患者
             </Button>
           </div>
+        )}
 
-          <div className="upload-section">
-            <Upload {...uploadProps}>
-              <Button icon={<UploadOutlined />}>选择文件</Button>
-            </Upload>
-            <div className="upload-tips">
-              <p>支持的文件类型：{ALLOWED_EXTENSIONS.join(', ')}</p>
-              <p>最大文件大小：{MAX_FILE_SIZE / (1024 * 1024)}MB</p>
-            </div>
+        <div className="upload-section">
+          <Upload {...uploadProps}>
+            <Button icon={<UploadOutlined />}>选择文件</Button>
+          </Upload>
+          <div className="upload-tips">
+            <p>支持的文件类型：{ALLOWED_EXTENSIONS.join(', ')}</p>
+            <p>最大文件大小：{MAX_FILE_SIZE / (1024 * 1024)}MB</p>
           </div>
-          
+        </div>
+        
+        <Button
+          type="primary"
+          onClick={handleUpload}
+          disabled={fileList.length === 0 || (!selectedPatient && !form.getFieldValue('patient'))}
+          loading={uploading}
+          style={{ marginTop: 16 }}
+        >
+          {uploading ? '上传中' : '开始上传'}
+        </Button>
+
+        {progress > 0 && (
+          <Progress percent={progress} status={progress === 100 ? "success" : "active"} />
+        )}
+
+        {previewImage && (
+          <div className="preview-section">
+            {imageLoading ? (
+              <div className="image-loading">
+                <div className="spinner"></div>
+                <p>加载预览图...</p>
+              </div>
+            ) : (
+              <img 
+                src={previewImage} 
+                alt="预览" 
+                className="preview-image"
+                loading="lazy"
+              />
+            )}
+          </div>
+        )}
+
+        {uploadedImageId && !processing && (
           <Button
             type="primary"
-            onClick={handleUpload}
-            disabled={fileList.length === 0 || !selectedPatient}
-            loading={uploading}
+            onClick={handleProcess}
             style={{ marginTop: 16 }}
           >
-            {uploading ? '上传中' : '开始上传'}
+            开始处理
           </Button>
+        )}
 
-          {progress > 0 && (
+        {processing && (
+          <div style={{ marginTop: 16 }}>
             <Progress percent={progress} status={progress === 100 ? "success" : "active"} />
-          )}
-
-          {previewImage && (
-            <div className="preview-section">
-              <h3>图像预览</h3>
-              {imageLoading ? (
-                <div className="image-loading">
-                  <div className="spinner"></div>
-                  <p>加载预览图...</p>
-                </div>
-              ) : (
-                <img 
-                  src={previewImage} 
-                  alt="预览" 
-                  className="preview-image"
-                  loading="lazy"
-                />
-              )}
+            <div style={{ textAlign: 'center', marginTop: 8 }}>
+              正在处理图像...
             </div>
-          )}
+          </div>
+        )}
 
-          {uploadedImageId && !processing && (
-            <Button
-              type="primary"
-              onClick={handleProcess}
-              style={{ marginTop: 16 }}
-            >
-              开始处理
-            </Button>
-          )}
-
-          {processing && (
-            <div style={{ marginTop: 16 }}>
-              <Progress percent={progress} status={progress === 100 ? "success" : "active"} />
-              <div style={{ textAlign: 'center', marginTop: 8 }}>
-                正在处理图像...
-              </div>
-            </div>
-          )}
-
-          {processingLogs.length > 0 && (
-            <div className="processing-logs">
-              <h3>处理日志</h3>
-              <List
-                size="small"
-                bordered
-                dataSource={processingLogs}
-                renderItem={item => <List.Item>{item}</List.Item>}
-              />
-            </div>
-          )}
-        </Space>
-      </Card>
+        {processingLogs.length > 0 && (
+          <div className="processing-logs">
+            <h3>处理日志</h3>
+            <List
+              size="small"
+              bordered
+              dataSource={processingLogs}
+              renderItem={item => <List.Item>{item}</List.Item>}
+            />
+          </div>
+        )}
+      </Space>
 
       <Modal
         title="新建患者"
@@ -412,7 +450,7 @@ const ImageUpload = () => {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </Card>
   );
 };
 
