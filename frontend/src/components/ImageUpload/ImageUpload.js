@@ -53,7 +53,7 @@ const compressImage = async (file) => {
 const ALLOWED_EXTENSIONS = ['.dcm', '.nii', '.nii.gz'];
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
-const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect }) => {
+const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, autoProcess = false }) => {
   const [fileList, setFileList] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -117,6 +117,9 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect }) =>
 
     setUploading(true);
     setProgress(0);
+    setProcessingLogs([]);
+    // 不清除预览图，保留用户上传时的预览
+    // setPreviewImage(null);
 
     try {
       const formData = new FormData();
@@ -133,17 +136,48 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect }) =>
         }
       });
 
-      if (response.data.status === 'success') {
-        setUploadedImageId(response.data.file_info.id);
+      console.log('上传响应:', response.data);
+
+      // 检查响应数据
+      if (!response.data) {
+        throw new Error('服务器没有返回数据');
+      }
+
+      if (response.data.message === '文件上传成功' && response.data.image) {
+        // 成功处理
+        const imageId = response.data.image.id || response.data.image._id;
+        console.log('设置图像ID:', imageId);
+        setUploadedImageId(imageId);
         message.success('上传成功');
+        setProcessingLogs(prevLogs => [...prevLogs, `文件上传成功: ${response.data.image.filename || fileList[0].name}`]);
+        
         if (onUploadSuccess) {
-          onUploadSuccess(response.data.file_info);
+          onUploadSuccess(response.data.image);
         }
-        fetchPreviewImage(response.data.file_info.filename);
+
+        // 如果服务器返回了预览图数据，直接使用
+        if (response.data.image.preview) {
+          setPreviewImage(`data:image/png;base64,${response.data.image.preview}`);
+          setProcessingLogs(prevLogs => [...prevLogs, '预览图获取成功']);
+        }
+        // 否则尝试单独获取预览图
+        else if (response.data.image.filename) {
+          try {
+            await fetchPreviewImage(response.data.image.filename);
+          } catch (error) {
+            console.error('获取预览图失败，保留原有预览');
+            // 预览获取失败时保留原有预览，不影响后续处理
+          }
+        }
+
+        console.log('上传完成，uploadedImageId:', imageId, '处理状态:', processing);
+      } else {
+        throw new Error(response.data.message || '上传失败');
       }
     } catch (error) {
       console.error('上传错误:', error);
-      message.error(error.response?.data?.error || '上传失败');
+      setProcessingLogs(prevLogs => [...prevLogs, `上传失败: ${error.message || '未知错误'}`]);
+      message.error(error.response?.data?.message || error.message || '上传失败');
     } finally {
       setUploading(false);
       setProgress(0);
@@ -152,86 +186,254 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect }) =>
   };
 
   const fetchPreviewImage = async (filename) => {
+    if (!filename) {
+      console.error('获取预览图失败: 文件名为空');
+      return;
+    }
+
     setImageLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE}/api/preview/${filename}`, {
+      // 使用相对路径，让axiosInstance处理baseURL
+      const response = await axiosInstance.get(`/api/preview/${filename}`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
-        }
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+        // 添加withCredentials配置
+        withCredentials: true
       });
       
-      if (response.data.status === 'success') {
+      console.log('预览图响应:', response.data);
+      
+      if (response.data.status === 'success' && response.data.image) {
         setPreviewImage(`data:image/png;base64,${response.data.image}`);
+        setProcessingLogs(prevLogs => [...prevLogs, '预览图生成成功']);
+      } else {
+        throw new Error(response.data.message || '获取预览图失败：服务器返回的数据格式不正确');
       }
     } catch (error) {
       console.error('获取预览图失败:', error);
-      message.error('获取预览图失败');
+      setProcessingLogs(prevLogs => [...prevLogs, `获取预览图失败: ${error.message || '未知错误'}`]);
+      // 不显示错误消息，因为预览图获取失败不影响主要功能
+      // message.error('获取预览图失败');
     } finally {
       setImageLoading(false);
     }
   };
 
-  const handleProcess = async () => {
-    if (!uploadedImageId) {
-      message.error('请先上传图像');
+  const handleProcess = async (imageId = null) => {
+    const targetImageId = imageId || uploadedImageId;
+    if (!targetImageId) {
+      message.error('没有可处理的图像');
       return;
     }
 
     setProcessing(true);
-    setProcessingLogs([]);
+    setProcessingLogs(prevLogs => [...prevLogs, '开始处理图像...']);
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_BASE}/api/process/${uploadedImageId}`, {}, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        }
+      console.log('开始处理图像, imageId:', targetImageId);
+      const response = await axiosInstance.post('/api/process', {
+        image_id: targetImageId
       });
 
-      if (response.data.status === 'processing') {
-        message.success('开始处理图像');
+      console.log('处理响应:', response.data);
+
+      if (response.data.task_id) {
+        setProcessingLogs(prevLogs => [...prevLogs, `任务ID: ${response.data.task_id}`]);
+        // 立即开始轮询状态
         pollProcessingStatus(response.data.task_id);
+      } else {
+        throw new Error('未获取到任务ID');
       }
     } catch (error) {
-      console.error('处理错误:', error);
-      message.error('处理失败');
+      console.error('处理请求失败:', error);
+      setProcessingLogs(prevLogs => [...prevLogs, `处理失败: ${error.message || '未知错误'}`]);
+      message.error('处理请求失败');
       setProcessing(false);
     }
   };
 
-  const pollProcessingStatus = async (imageId) => {
-    setProcessing(true);
-    setProcessingLogs([]);
-    
-    const interval = setInterval(async () => {
-      try {
-        const response = await axiosInstance.get(`/api/tasks/${imageId}`);
-        const { status, progress, logs } = response.data;
-        
-        setProgress(progress || 0);
-        if (logs) setProcessingLogs(logs);
+  const pollProcessingStatus = async (taskId) => {
+    if (!taskId) {
+      console.error('轮询错误: 未提供taskId');
+      setProcessing(false);
+      return;
+    }
 
-        if (status === 'completed') {
-          clearInterval(interval);
-          setProcessing(false);
-          message.success('处理完成');
-          // 获取处理结果
-          fetchResults(imageId);
-        } else if (status === 'failed') {
-          clearInterval(interval);
-          setProcessing(false);
-          message.error('处理失败');
-        }
-      } catch (error) {
-        console.error('获取处理状态失败:', error);
-        clearInterval(interval);
-        setProcessing(false);
-        message.error('获取处理状态失败');
+    let pollCount = 0;
+    let startTime = Date.now();
+    const PHASE_1_DURATION = 7 * 60 * 1000;   // 7分钟
+    const PHASE_2_DURATION = 13 * 60 * 1000;  // 13分钟
+    const MAX_DURATION = 30 * 60 * 1000;      // 30分钟
+    let pollTimer = null;
+
+    const getPollingInterval = () => {
+      const elapsedTime = Date.now() - startTime;
+      if (elapsedTime < PHASE_1_DURATION) {
+        return 30000; // 0-7分钟：30秒
+      } else if (elapsedTime < PHASE_2_DURATION) {
+        return 10000; // 7-13分钟：10秒（高频期）
+      } else {
+        return 60000; // 13分钟后：60秒
       }
-    }, 2000);
+    };
 
-    return () => clearInterval(interval);
+    const checkStatus = async () => {
+      try {
+        const elapsedTime = Date.now() - startTime;
+        const elapsedMinutes = Math.floor(elapsedTime / 60000);
+        const elapsedSeconds = Math.floor((elapsedTime % 60000) / 1000);
+        const currentInterval = getPollingInterval() / 1000;
+        
+        console.log(`检查处理状态 (${pollCount + 1}次, 已耗时: ${elapsedMinutes}分${elapsedSeconds}秒, 当前轮询间隔: ${currentInterval}秒), taskId:`, taskId);
+        const response = await axiosInstance.get(`/api/status/${taskId}`, {
+          withCredentials: true,
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        console.log('状态响应:', response.data);
+
+        if (!response.data) {
+          throw new Error('未收到状态数据');
+        }
+
+        const status = response.data.status;
+        
+        // 只在状态变化时添加日志
+        if (!processingLogs.includes(`当前状态: ${status}`)) {
+          const phase = elapsedTime < PHASE_1_DURATION ? '初始阶段' : 
+                       elapsedTime < PHASE_2_DURATION ? '高频检查阶段' : '最终阶段';
+          setProcessingLogs(prevLogs => [...prevLogs, `当前状态: ${status} (${phase})`]);
+        }
+
+        if (status === 'completed' || status === 'success') {
+          clearInterval(pollTimer);
+          setProcessing(false);
+          setProcessingLogs(prevLogs => [...prevLogs, `处理完成 (总耗时: ${elapsedMinutes}分${elapsedSeconds}秒)`]);
+          await fetchResults(taskId);
+          message.success('处理完成');
+          return;
+        } else if (status === 'failed' || status === 'error') {
+          clearInterval(pollTimer);
+          setProcessing(false);
+          const errorMsg = response.data.error || '处理失败';
+          setProcessingLogs(prevLogs => [...prevLogs, `错误: ${errorMsg} (总耗时: ${elapsedMinutes}分${elapsedSeconds}秒)`]);
+          message.error(errorMsg);
+          return;
+        }
+
+        // 更新进度信息（只在进度变化时添加日志）
+        if (response.data.progress) {
+          const progressMsg = `进度: ${response.data.progress}`;
+          if (!processingLogs.includes(progressMsg)) {
+            setProcessingLogs(prevLogs => [...prevLogs, progressMsg]);
+          }
+        }
+
+        pollCount++;
+        
+        // 检查是否超时
+        if (elapsedTime >= MAX_DURATION) {
+          clearInterval(pollTimer);
+          setProcessing(false);
+          setProcessingLogs(prevLogs => [...prevLogs, `处理超时（${MAX_DURATION / 60000}分钟）`]);
+          message.error(`处理超时（${MAX_DURATION / 60000}分钟）`);
+          return;
+        }
+
+        // 根据当前阶段调整轮询间隔
+        const newInterval = getPollingInterval();
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = setInterval(checkStatus, newInterval);
+        }
+
+      } catch (error) {
+        console.error('检查状态失败:', error);
+        const errorMsg = `检查状态失败: ${error.message || '未知错误'}`;
+        if (!processingLogs.includes(errorMsg)) {
+          setProcessingLogs(prevLogs => [...prevLogs, errorMsg]);
+        }
+        
+        // 如果是网络错误，继续轮询
+        if (error.response?.status >= 500 || error.code === 'ECONNABORTED' || error.message === 'Network Error') {
+          if (!processingLogs.includes('网络错误，继续轮询...')) {
+            setProcessingLogs(prevLogs => [...prevLogs, '网络错误，继续轮询...']);
+          }
+          return; // 继续轮询
+        } else {
+          clearInterval(pollTimer);
+          setProcessing(false);
+          message.error('检查状态失败');
+        }
+      }
+    };
+
+    // 立即执行一次状态检查
+    await checkStatus();
+    
+    // 设置初始轮询间隔
+    pollTimer = setInterval(checkStatus, getPollingInterval());
+
+    // 清理函数
+    return () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+      }
+    };
+  };
+
+  const fetchResults = async (taskId) => {
+    if (!taskId) {
+      console.error('获取结果错误: 未提供taskId');
+      return;
+    }
+
+    try {
+      console.log('获取处理结果, taskId:', taskId);
+      const response = await axiosInstance.get(`/api/results/${taskId}`);
+      console.log('结果响应:', response.data);
+
+      if (response.data.status === 'success') {
+        setProcessingLogs(prevLogs => [...prevLogs, '成功获取处理结果']);
+        
+        // 显示结果
+        if (response.data.results) {
+          const results = response.data.results;
+          setProcessingLogs(prevLogs => [
+            ...prevLogs,
+            '处理结果:',
+            ...Object.entries(results).map(([key, value]) => {
+              if (typeof value === 'number') {
+                // 对体积数据进行格式化
+                if (key.includes('volume')) {
+                  return `${key}: ${value.toFixed(2)} mm³`;
+                }
+                return `${key}: ${value.toFixed(2)}`;
+              }
+              return `${key}: ${value}`;
+            })
+          ]);
+
+          // 如果有预览图，显示预览
+          if (response.data.preview) {
+            setPreviewImage(`data:image/png;base64,${response.data.preview}`);
+          }
+
+          // 如果有分割结果图像，也显示
+          if (response.data.segmented_preview) {
+            setProcessingLogs(prevLogs => [...prevLogs, '分割结果图像已生成']);
+          }
+        }
+      } else {
+        throw new Error(response.data.message || '获取结果失败');
+      }
+    } catch (error) {
+      console.error('获取结果失败:', error);
+      setProcessingLogs(prevLogs => [...prevLogs, `获取结果失败: ${error.message || '未知错误'}`]);
+      message.error('获取结果失败');
+    }
   };
 
   const validateFile = (file) => {
@@ -351,6 +553,10 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect }) =>
                 <div className="spinner"></div>
                 <p>加载预览图...</p>
               </div>
+            ) : previewImage === 'error' ? (
+              <div className="preview-error">
+                <p>预览图加载失败</p>
+              </div>
             ) : (
               <img 
                 src={previewImage} 
@@ -365,7 +571,7 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect }) =>
         {uploadedImageId && !processing && (
           <Button
             type="primary"
-            onClick={handleProcess}
+            onClick={() => handleProcess()}
             style={{ marginTop: 16 }}
           >
             开始处理
@@ -388,7 +594,13 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect }) =>
               size="small"
               bordered
               dataSource={processingLogs}
-              renderItem={item => <List.Item>{item}</List.Item>}
+              renderItem={item => (
+                <List.Item>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {item}
+                  </pre>
+                </List.Item>
+              )}
             />
           </div>
         )}

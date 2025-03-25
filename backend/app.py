@@ -54,11 +54,12 @@ app.config.from_object(Config)
 CORS(app, 
     resources={
         r"/*": {
-            "origins": ["http://localhost:3000"],
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
-            "supports_credentials": True,
-            "max_age": 3600
+            "origins": Config.CORS_ORIGINS,
+            "methods": Config.CORS_METHODS,
+            "allow_headers": Config.CORS_HEADERS,
+            "supports_credentials": Config.CORS_SUPPORTS_CREDENTIALS,
+            "max_age": Config.CORS_MAX_AGE,
+            "expose_headers": ["Content-Type", "Authorization"]
         }
     }
 )
@@ -66,12 +67,18 @@ CORS(app,
 # 修改CORS预检请求处理器
 @app.after_request
 def after_request(response):
-    if 'Access-Control-Allow-Origin' not in response.headers:
-        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
-    response.headers.add('Access-Control-Max-Age', '3600')
+    origin = request.headers.get('Origin')
+    if origin and origin in Config.CORS_ORIGINS:
+        # 删除可能存在的旧header
+        if 'Access-Control-Allow-Origin' in response.headers:
+            del response.headers['Access-Control-Allow-Origin']
+        if 'Access-Control-Allow-Credentials' in response.headers:
+            del response.headers['Access-Control-Allow-Credentials']
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Headers', ', '.join(Config.CORS_HEADERS))
+        response.headers.add('Access-Control-Allow-Methods', ', '.join(Config.CORS_METHODS))
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Max-Age', str(Config.CORS_MAX_AGE))
     return response
 
 # 获取当前文件的绝对路径
@@ -479,10 +486,19 @@ def upload_image():
         print(f"错误详情: {traceback.format_exc()}")
         return jsonify({'error': error_msg}), 500
 
-@app.route('/api/process/<int:image_id>', methods=['POST'])
+@app.route('/api/process', methods=['POST', 'OPTIONS'])
 @jwt_required()
-def process_image(image_id):
+def process_image():
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
+        data = request.get_json()
+        if not data or 'image_id' not in data:
+            return jsonify({'error': '未提供图像ID'}), 400
+            
+        image_id = data['image_id']
+        
         # 获取图像记录
         image = DBImage.query.get(image_id)
         if not image:
@@ -527,8 +543,8 @@ def process_image(image_id):
                     # 更新图像记录
                     image.processed_filename = f"{task_id}/segmented.nii.gz"
                     image.processed_at = datetime.now()
-                    image.processed = True  # 添加处理状态标记
-                    image.tissue_stats = results  # 保存组织统计数据
+                    image.processed = True
+                    image.tissue_stats = results
                     db.session.commit()
                     print(f"数据库记录已更新: {image.id}")
                     
@@ -539,7 +555,7 @@ def process_image(image_id):
                 print(f"\n=== 任务失败 ===")
                 print(f"错误信息: {str(e)}")
                 print(f"错误堆栈:\n{traceback.format_exc()}")
-                with app.app_context():  # 错误处理也需要应用上下文
+                with app.app_context():
                     image.processing_error = str(e)
                     db.session.commit()
                 task_queue.fail_task(task_id)
@@ -559,10 +575,13 @@ def process_image(image_id):
         print(f"错误详情: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/tasks/<task_id>', methods=['GET'])
+@app.route('/api/status/<task_id>', methods=['GET', 'OPTIONS'])
 @jwt_required()
-def get_task_status(task_id):
+def get_task_status_new(task_id):
     """获取任务状态"""
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         print(f"\n=== 获取任务状态 ===")
         print(f"任务ID: {task_id}")

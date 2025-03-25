@@ -37,9 +37,16 @@ class Config:
     JWT_IDENTITY_CLAIM = "sub"
     
     # CORS配置
-    CORS_ORIGINS = ['*']
+    CORS_ORIGINS = [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://localhost:3001',  # 备用端口
+        'http://127.0.0.1:3001'   # 备用端口
+    ]
     CORS_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-    CORS_HEADERS = ['Content-Type', 'Authorization']
+    CORS_HEADERS = ['Content-Type', 'Authorization', 'Accept']
+    CORS_SUPPORTS_CREDENTIALS = True
+    CORS_MAX_AGE = 3600  # 预检请求缓存时间
     
     # MATLAB配置
     MATLAB_PATH = os.environ.get('MATLAB_PATH') or r"D:\Matlab\bin\matlab.exe"

@@ -557,103 +557,15 @@ const MainApp = () => {
                                         </button>
                                     </div>
                                 </div>
-                                <div className="upload-section">
-                                    <ImageUpload 
-                                        patientId={selectedPatient ? selectedPatient.id : null}
-                                        onUploadSuccess={(data) => {
-                                            console.log('上传成功:', data);
-                                            setUploadedImage(data.image);
-                                            setProcessingStatus('uploaded');
-                                        }}
-                                        disableProcessing={true}
-                                    />
-                                </div>
-
-                                {selectedFile && (
-                                    <div className="preview-section">
-                                        <h3>图像预览</h3>
-                                        <div className="preview-container">
-                                            {imageLoading ? (
-                                                <div className="image-loading">
-                                                    <div className="spinner"></div>
-                                                    <p>正在加载预览图...</p>
-                                                </div>
-                                            ) : previewError ? (
-                                                <div className="preview-error">
-                                                    {previewError}
-                                                </div>
-                                            ) : previewImage ? (
-                                                <div className="preview-wrapper">
-                                                    <img 
-                                                        src={previewImage} 
-                                                        alt="预览图" 
-                                                        className="preview-image"
-                                                        loading="lazy"
-                                                    />
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {processingStatus && processingStatus !== 'uploaded' && (
-                                    <div className={`status-message ${processingStatus}`}>
-                                        {processingStatus === 'uploading' && '正在上传图像...'}
-                                        {processingStatus === 'processing' && '正在处理图像...'}
-                                        {processingStatus === 'completed' && '处理完成'}
-                                        {processingStatus === 'failed' && '处理失败'}
-                                        {processingStatus === 'error' && '发生错误'}
-                                    </div>
-                                )}
-
-                                {matlabLog && (
-                                    <div className="matlab-log">
-                                        <h4>处理日志</h4>
-                                        <pre>{matlabLog}</pre>
-                                    </div>
-                                )}
-
-                                {renderAnalysisResults()}
-
-                                {state.result && (
-                                    <div className="analysis-section">
-                                        <h3>分析结果</h3>
-                                        <div className="results-grid">
-                                            <div className="result-item">
-                                                <h4>图像尺寸</h4>
-                                                <p>{state.result.image_size ? `${state.result.image_size[0]} x ${state.result.image_size[1]}` : 'N/A'}</p>
-                                            </div>
-                                            <div className="result-item">
-                                                <h4>平均强度</h4>
-                                                <p>{state.result.mean_intensity ? state.result.mean_intensity.toFixed(2) : 'N/A'}</p>
-                                            </div>
-                                            <div className="result-item">
-                                                <h4>最大强度</h4>
-                                                <p>{state.result.max_intensity ? state.result.max_intensity.toFixed(2) : 'N/A'}</p>
-                                            </div>
-                                            <div className="result-item">
-                                                <h4>最小强度</h4>
-                                                <p>{state.result.min_intensity ? state.result.min_intensity.toFixed(2) : 'N/A'}</p>
-                                            </div>
-                                            <div className="result-item">
-                                                <h4>病灶体积</h4>
-                                                <p>{state.result.lesion_volume ? state.result.lesion_volume.toFixed(2) : 'N/A'} 像素</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {state.error && (
-                                    <div className="error-message">
-                                        {state.error}
-                                    </div>
-                                )}
-
-                                {state.status === 'completed' && (
-                                    <div className="success-message">
-                                        处理完成！
-                                    </div>
-                                )}
+                                <ImageUpload 
+                                    selectedPatient={selectedPatient ? selectedPatient.id : null}
+                                    onUploadSuccess={(data) => {
+                                        console.log('上传成功:', data);
+                                        setUploadedImage(data.image);
+                                        setProcessingStatus('uploaded');
+                                    }}
+                                    hidePatientSelect={true}
+                                />
                             </div>
                         </ProtectedRoute>
                     } />
