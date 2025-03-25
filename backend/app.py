@@ -215,7 +215,13 @@ task_queue = TaskQueue()
 
 def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
     try:
+        print(f"\n=== 开始处理图像 ===")
+        print(f"输入文件: {full_filepath}")
+        print(f"任务目录: {task_dir}")
+        print(f"文件类型: {file_ext}")
+
         if file_ext == '.dcm':
+            print("处理DICOM文件...")
             # 处理DICOM文件
             ds = pydicom.dcmread(full_filepath)
             pixel_array = ds.pixel_array
@@ -223,20 +229,25 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
             # 确保是3D数组
             if len(pixel_array.shape) == 2:
                 pixel_array = pixel_array[np.newaxis, :, :]
+            print(f"图像形状: {pixel_array.shape}")
             
             # 使用PIL处理图像
             img = PILImage.fromarray(pixel_array[0].astype('uint8'))
             preview_path = os.path.join(task_dir, 'preview.png')
             img.save(preview_path)
+            print(f"预览图已保存: {preview_path}")
             
             # 转换为NIfTI
             nifti_img = nib.Nifti1Image(pixel_array, np.eye(4))
             nib.save(nifti_img, nifti_file)
+            print(f"已转换为NIfTI: {nifti_file}")
             
         elif file_ext in ['.nii', '.gz']:
+            print("处理NIfTI文件...")
             # 处理NIfTI文件
             img = nib.load(full_filepath)
             data = img.get_fdata()
+            print(f"NIfTI图像形状: {data.shape}")
             
             # 获取中间切片
             mid_slice = data.shape[2] // 2
@@ -249,9 +260,11 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
             preview_img = PILImage.fromarray(slice_data)
             preview_path = os.path.join(task_dir, 'preview.png')
             preview_img.save(preview_path)
+            print(f"预览图已保存: {preview_path}")
             
             # 复制NIfTI文件
             shutil.copy2(full_filepath, nifti_file)
+            print(f"已复制NIfTI文件: {nifti_file}")
         else:
             raise Exception(f"不支持的文件格式: {file_ext}")
 
@@ -260,7 +273,7 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
         cat12_path = app.config['CAT12_PATH'].replace('/', '\\')
         matlab_path = app.config['MATLAB_PATH'].replace('/', '\\')
 
-        print(f"检查路径:")
+        print(f"\n=== 检查环境配置 ===")
         print(f"MATLAB路径: {matlab_path}")
         print(f"SPM12路径: {spm12_path}")
         print(f"CAT12路径: {cat12_path}")
@@ -278,7 +291,9 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
         if not os.path.exists(tpm_path):
             raise Exception(f"TPM文件不存在: {tpm_path}")
         tpm_path = tpm_path.replace('/', '\\')
+        print(f"TPM文件路径: {tpm_path}")
 
+        print("\n=== 准备MATLAB处理 ===")
         # 创建MATLAB脚本
         matlab_script = '''
         try
@@ -324,11 +339,12 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
         script_path = os.path.join(task_dir, 'cat12_process.m')
         with open(script_path, 'w') as f:
             f.write(matlab_script)
-        print(f"保存MATLAB脚本: {script_path}")
+        print(f"MATLAB脚本已保存: {script_path}")
 
         # 运行MATLAB脚本
         matlab_cmd = f'"{matlab_path}" -nodesktop -nosplash -wait -r "run(\'{script_path}\')"'
-        print(f"执行MATLAB命令: {matlab_cmd}")
+        print(f"\n=== 执行MATLAB处理 ===")
+        print(f"执行命令: {matlab_cmd}")
         
         process = subprocess.Popen(
             matlab_cmd, 
@@ -340,10 +356,20 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
         stdout, stderr = process.communicate()
 
         # 检查MATLAB执行结果
+        print("\n=== MATLAB执行结果 ===")
+        print(f"返回码: {process.returncode}")
+        if stdout:
+            print("标准输出:")
+            print(stdout.decode('gbk', errors='ignore'))
+        if stderr:
+            print("错误输出:")
+            print(stderr.decode('gbk', errors='ignore'))
+
         if process.returncode != 0:
             error_msg = stderr.decode('gbk', errors='ignore')
             raise Exception(f"MATLAB处理失败: {error_msg}")
 
+        print("\n=== 检查处理结果 ===")
         # 检查处理结果
         result_files = {
             'gm': os.path.join(task_dir, 'mri', 'p1input.nii'),
@@ -351,34 +377,49 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
             'csf': os.path.join(task_dir, 'mri', 'p3input.nii')
         }
 
+        # 检查每个文件的存在性和大小
+        for tissue, path in result_files.items():
+            if os.path.exists(path):
+                size = os.path.getsize(path)
+                print(f"{tissue}文件 ({path}): 存在，大小 {size/1024:.2f}KB")
+            else:
+                print(f"{tissue}文件 ({path}): 不存在")
+
         missing_files = [f for f, path in result_files.items() if not os.path.exists(path)]
         if missing_files:
             raise Exception(f"缺少处理结果文件: {', '.join(missing_files)}")
 
         # 计算体积
+        print("\n=== 计算组织体积 ===")
         volumes = {}
         for tissue, path in result_files.items():
             img = nib.load(path)
             voxel_volume = np.prod(img.header.get_zooms())  # 体素体积（mm³）
             tissue_volume = np.sum(img.get_fdata()) * voxel_volume
             volumes[f"{tissue}_volume"] = float(tissue_volume)
+            print(f"{tissue}体积: {tissue_volume:.2f}mm³")
 
-        volumes['tiv'] = float(sum(volumes.values()))  # 总颅内体积
+        volumes['tiv'] = float(sum(volumes.values()))
+        print(f"总颅内体积: {volumes['tiv']:.2f}mm³")
 
         # 保存结果
         results_path = os.path.join(task_dir, 'results.json')
         with open(results_path, 'w') as f:
             json.dump(volumes, f)
+        print(f"\n结果已保存到: {results_path}")
 
         # 复制分割结果到预期的位置
         segmented_path = os.path.join(task_dir, 'segmented.nii.gz')
         shutil.copy2(result_files['gm'], segmented_path)
+        print(f"灰质分割结果已复制到: {segmented_path}")
 
+        print("\n=== 处理完成 ===")
         return volumes
 
     except Exception as e:
-        logging.error(f"处理图像时发生错误: {str(e)}")
-        logging.error(f"错误详情: {traceback.format_exc()}")
+        print(f"\n=== 处理失败 ===")
+        print(f"错误信息: {str(e)}")
+        print(f"错误堆栈:\n{traceback.format_exc()}")
         raise
 
 @app.route('/api/upload', methods=['POST'])
@@ -477,19 +518,32 @@ def process_image(image_id):
         # 创建后台线程处理图像
         def process_task():
             try:
-                # 处理图像
-                results = process_dicom_image(file_path, task_dir, nifti_file, file_ext)
-                
-                # 更新图像记录
-                image.processed_filename = f"{task_id}/segmented.nii.gz"
-                image.processed_at = datetime.now()
-                db.session.commit()
-                
-                # 完成任务
-                task_queue.complete_task(task_id, results)
+                print(f"\n=== 开始处理任务 ===")
+                with app.app_context():  # 添加应用上下文
+                    # 处理图像
+                    results = process_dicom_image(file_path, task_dir, nifti_file, file_ext)
+                    print(f"处理结果: {results}")
+                    
+                    # 更新图像记录
+                    image.processed_filename = f"{task_id}/segmented.nii.gz"
+                    image.processed_at = datetime.now()
+                    image.processed = True  # 添加处理状态标记
+                    image.tissue_stats = results  # 保存组织统计数据
+                    db.session.commit()
+                    print(f"数据库记录已更新: {image.id}")
+                    
+                    # 完成任务
+                    task_queue.complete_task(task_id, results)
+                    print(f"任务已完成: {task_id}")
             except Exception as e:
-                print(f"处理失败: {str(e)}")
+                print(f"\n=== 任务失败 ===")
+                print(f"错误信息: {str(e)}")
+                print(f"错误堆栈:\n{traceback.format_exc()}")
+                with app.app_context():  # 错误处理也需要应用上下文
+                    image.processing_error = str(e)
+                    db.session.commit()
                 task_queue.fail_task(task_id)
+                print(f"任务已标记为失败: {task_id}")
                 
         thread = Thread(target=process_task)
         thread.daemon = True
@@ -510,30 +564,45 @@ def process_image(image_id):
 def get_task_status(task_id):
     """获取任务状态"""
     try:
+        print(f"\n=== 获取任务状态 ===")
+        print(f"任务ID: {task_id}")
+        
         # 获取任务状态
         status = task_queue.tasks.get(task_id)
         if not status:
+            print(f"任务不存在: {task_id}")
             return jsonify({'error': '任务不存在'}), 404
             
+        print(f"任务状态: {status}")
+        print(f"任务进度: {task_queue.get_progress(task_id)}")
+        
         # 获取MATLAB日志
         log_file = os.path.join(app.config['PROCESSED_FOLDER'], task_id, 'matlab.log')
         matlab_log = None
         if os.path.exists(log_file):
             with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
                 matlab_log = f.read()
+            print("已读取MATLAB日志")
+        else:
+            print(f"MATLAB日志不存在: {log_file}")
         
         # 获取处理结果
         results = task_queue.get_results(task_id)
+        print(f"处理结果: {results}")
         
-        return jsonify({
+        response_data = {
             'status': status,
             'progress': task_queue.get_progress(task_id),
             'results': results,
             'matlab_log': matlab_log
-        })
+        }
+        print(f"返回数据: {response_data}")
+        
+        return jsonify(response_data)
     except Exception as e:
-        print(f"获取任务状态失败: {str(e)}")
-        print(f"错误详情: {traceback.format_exc()}")
+        print(f"\n=== 获取状态失败 ===")
+        print(f"错误信息: {str(e)}")
+        print(f"错误堆栈:\n{traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tasks')
