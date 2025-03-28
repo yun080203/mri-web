@@ -10,6 +10,7 @@ import Register from './components/Auth/Register';
 import PatientList from './components/Patient/PatientList';
 import PatientDetail from './components/Patient/PatientDetail';
 import ImageUpload from './components/ImageUpload/ImageUpload';
+import PatientEdit from './components/Patient/PatientEdit';
 import './styles/dicom.css';
 import './styles/App.css';
 import './styles/Image.css';
@@ -171,19 +172,27 @@ const MainApp = () => {
             try {
                 const token = localStorage.getItem('token');
                 if (!token) {
-                    console.error('未找到token');
                     navigate('/login');
                     return;
                 }
 
-                const response = await axiosInstance.get('/api/patients');
-                console.log('获取到的患者列表:', response.data);
-                if (response.data && Array.isArray(response.data.patients)) {
+                const response = await axios.get(`${API_BASE}/api/patients`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    withCredentials: true
+                });
+
+                if (response.data.success) {
                     setPatients(response.data.patients);
+                } else {
+                    console.error('获取患者列表失败:', response.data.error);
                 }
             } catch (error) {
                 console.error('获取患者列表失败:', error);
                 if (error.response?.status === 401) {
+                    localStorage.removeItem('token');
                     navigate('/login');
                 }
             }
@@ -581,6 +590,9 @@ const MainApp = () => {
                             <PatientDetail />
                         </ProtectedRoute>
                     } />
+                    
+                    <Route path="/patients/new" element={<PatientEdit />} />
+                    <Route path="/patients/:id/edit" element={<PatientEdit />} />
                     
                     <Route path="/compare" element={
                         <ProtectedRoute>

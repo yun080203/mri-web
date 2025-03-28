@@ -10,6 +10,7 @@ function PatientList() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [deleteConfirm, setDeleteConfirm] = useState(null);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -46,6 +47,32 @@ function PatientList() {
         }
     };
 
+    const handleDelete = async (patientId) => {
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                navigate('/login');
+                return;
+            }
+
+            const response = await axios.delete(`${API_BASE}/api/patients/${patientId}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.data.success) {
+                // 从列表中移除已删除的患者
+                setPatients(patients.filter(patient => patient.id !== patientId));
+                setDeleteConfirm(null);
+            }
+        } catch (error) {
+            console.error('删除患者失败:', error);
+            setError(error.response?.data?.error || '删除患者失败');
+        }
+    };
+
     const filteredPatients = patients.filter(patient =>
         patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         patient.patient_id.toLowerCase().includes(searchTerm.toLowerCase())
@@ -76,26 +103,59 @@ function PatientList() {
                             <p><strong>患者ID：</strong>{patient.patient_id}</p>
                             <p><strong>年龄：</strong>{patient.age}</p>
                             <p><strong>性别：</strong>{patient.gender}</p>
-                            <p><strong>检查次数：</strong>{patient.image_count}</p>
+                            <p><strong>检查次数：</strong>{patient.images?.length || 0}</p>
                             <p><strong>首次检查：</strong>{new Date(patient.created_at).toLocaleDateString()}</p>
                         </div>
                         <div className="patient-actions">
                             <Link to={`/patients/${patient.id}`} className="view-button">
                                 查看详情
                             </Link>
+                            <Link to={`/patients/${patient.id}/edit`} className="edit-button">
+                                编辑
+                            </Link>
                             <Link to={`/upload?patient_id=${patient.id}`} className="upload-button">
                                 上传新图像
                             </Link>
+                            <button
+                                className="delete-button"
+                                onClick={() => setDeleteConfirm(patient.id)}
+                            >
+                                删除
+                            </button>
                         </div>
                     </div>
                 ))}
             </div>
 
-            <div className="add-patient-section">
+            <div className="patient-list-footer">
                 <Link to="/patients/new" className="add-patient-button">
                     添加新患者
                 </Link>
             </div>
+
+            {/* 删除确认对话框 */}
+            {deleteConfirm && (
+                <div className="modal-overlay">
+                    <div className="modal-content">
+                        <h3>确认删除</h3>
+                        <p>您确定要删除这个患者吗？此操作不可撤销。</p>
+                        <div className="modal-actions">
+                            <button
+                                className="confirm-button"
+                                onClick={() => handleDelete(deleteConfirm)}
+                            >
+                                确认删除
+                            </button>
+                            <button
+                                className="cancel-button"
+                                onClick={() => setDeleteConfirm(null)}
+                            >
+                                取消
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

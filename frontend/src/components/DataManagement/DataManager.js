@@ -16,11 +16,33 @@ function DataManager() {
   const fetchPatients = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://localhost:5000/api/patients');
-      setPatients(response.data);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('未登录或登录已过期');
+        return;
+      }
+
+      const response = await axios.get('http://localhost:5000/api/patients', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data.success && Array.isArray(response.data.patients)) {
+        setPatients(response.data.patients);
+      } else {
+        setError('获取患者数据失败：数据格式不正确');
+        console.error('API返回数据格式不正确:', response.data);
+      }
     } catch (err) {
-      setError('获取患者数据失败');
-      console.error(err);
+      if (err.response?.status === 401) {
+        setError('未登录或登录已过期，请重新登录');
+        // 可以在这里添加重定向到登录页面的逻辑
+      } else {
+        setError('获取患者数据失败');
+        console.error('获取患者数据错误:', err);
+      }
     } finally {
       setLoading(false);
     }

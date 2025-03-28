@@ -53,6 +53,8 @@ class Patient(db.Model):
         }
 
 class Image(db.Model):
+    __tablename__ = 'image'
+    
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255), nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
@@ -62,8 +64,13 @@ class Image(db.Model):
     tissue_stats = db.Column(db.JSON)
     processed_filename = db.Column(db.String(255))
     processed = db.Column(db.Boolean, default=False)
-    processing_error = db.Column(db.String(255))
+    processing_error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    gm_volume = db.Column(db.Float)
+    wm_volume = db.Column(db.Float)
+    csf_volume = db.Column(db.Float)
+    tiv_volume = db.Column(db.Float)
+    processing_completed = db.Column(db.DateTime)
 
     def __repr__(self):
         return f'<Image {self.filename}>'
@@ -74,11 +81,16 @@ class Image(db.Model):
             'filename': self.filename,
             'original_filename': self.original_filename,
             'patient_id': self.patient_id,
-            'check_date': self.check_date.isoformat(),
+            'check_date': self.check_date.isoformat() if self.check_date else None,
             'lesion_volume': self.lesion_volume,
             'tissue_stats': self.tissue_stats,
             'processed_filename': self.processed_filename,
             'processed': self.processed,
             'processing_error': self.processing_error,
-            'created_at': self.created_at.isoformat()
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'gm_volume': self.gm_volume,
+            'wm_volume': self.wm_volume,
+            'csf_volume': self.csf_volume,
+            'tiv_volume': self.tiv_volume,
+            'processing_completed': self.processing_completed.isoformat() if self.processing_completed else None
         } 

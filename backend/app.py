@@ -32,6 +32,9 @@ from config.config import Config
 from models import db, User, Patient, Image as DBImage
 from threading import Thread
 import shutil
+from app.routes.patient_routes import patient_bp
+from functools import wraps
+import jwt
 
 # 配置日志
 logging.basicConfig(
@@ -51,34 +54,25 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 # 配置CORS
-CORS(app, 
-    resources={
-        r"/*": {
-            "origins": Config.CORS_ORIGINS,
-            "methods": Config.CORS_METHODS,
-            "allow_headers": Config.CORS_HEADERS,
-            "supports_credentials": Config.CORS_SUPPORTS_CREDENTIALS,
-            "max_age": Config.CORS_MAX_AGE,
-            "expose_headers": ["Content-Type", "Authorization"]
-        }
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:3000"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
     }
-)
+})
 
-# 修改CORS预检请求处理器
+# 注册蓝图
+app.register_blueprint(patient_bp, url_prefix='/api')
+
+# 添加全局CORS头
 @app.after_request
 def after_request(response):
-    origin = request.headers.get('Origin')
-    if origin and origin in Config.CORS_ORIGINS:
-        # 删除可能存在的旧header
-        if 'Access-Control-Allow-Origin' in response.headers:
-            del response.headers['Access-Control-Allow-Origin']
-        if 'Access-Control-Allow-Credentials' in response.headers:
-            del response.headers['Access-Control-Allow-Credentials']
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Headers', ', '.join(Config.CORS_HEADERS))
-        response.headers.add('Access-Control-Allow-Methods', ', '.join(Config.CORS_METHODS))
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        response.headers.add('Access-Control-Max-Age', str(Config.CORS_MAX_AGE))
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
     return response
 
 # 获取当前文件的绝对路径
@@ -1030,52 +1024,6 @@ def patients():
         print(f"错误详情: {traceback.format_exc()}")
         return jsonify({'error': f'服务器内部错误: {str(e)}'}), 500
 
-@app.route('/api/patients/<int:patient_id>', methods=['GET'])
-@jwt_required()
-def patient_detail(patient_id):
-    current_user_id = get_jwt_identity()
-    db = get_db()
-    
-    try:
-        # 获取患者基本信息
-        patient = db.execute('''
-            SELECT * FROM patients 
-            WHERE id = ? AND user_id = ?
-        ''', (patient_id, current_user_id)).fetchone()
-
-        if not patient:
-            return jsonify({'error': '未找到患者信息'}), 404
-
-        # 获取患者的所有图像记录
-        images = db.execute('''
-            SELECT * FROM images 
-            WHERE patient_id = ?
-            ORDER BY created_at DESC
-        ''', (patient_id,)).fetchall()
-
-        return jsonify({
-            'patient': {
-                'id': patient['id'],
-                'name': patient['name'],
-                'patient_id': patient['patient_id'],
-                'age': patient['age'],
-                'gender': patient['gender'],
-                'created_at': patient['created_at'],
-                'images': [{
-                    'id': img['id'],
-                    'filename': img['filename'],
-                    'check_date': img['check_date'],
-                    'lesion_volume': img['lesion_volume'],
-                    'created_at': img['created_at']
-                } for img in images]
-            }
-        }), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        db.close()
-
 # 错误处理中间件
 @app.errorhandler(Exception)
 def handle_error(error):
@@ -1111,7 +1059,39 @@ def init_db():
                 db.create_all()
             print("数据库创建成功")
         else:
-            print("数据库已存在，跳过创建")
+            print("数据库已存在，检查是否需要更新...")
+            with app.app_context():
+                # 检查是否需要添加新列
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                
+                # 获取现有列
+                cursor.execute("PRAGMA table_info(image)")
+                columns = [col[1] for col in cursor.fetchall()]
+                
+                # 需要添加的新列
+                new_columns = [
+                    ('gm_volume', 'FLOAT'),
+                    ('wm_volume', 'FLOAT'),
+                    ('csf_volume', 'FLOAT'),
+                    ('tiv_volume', 'FLOAT'),
+                    ('processing_completed', 'DATETIME'),
+                    ('processed', 'BOOLEAN'),
+                    ('processing_error', 'TEXT')
+                ]
+                
+                # 添加缺失的列
+                for col_name, col_type in new_columns:
+                    if col_name not in columns:
+                        print(f"添加新列: {col_name}")
+                        cursor.execute(f"ALTER TABLE image ADD COLUMN {col_name} {col_type}")
+                
+                # 更新现有记录的processed字段
+                cursor.execute("UPDATE image SET processed = 0 WHERE processed IS NULL")
+                
+                conn.commit()
+                conn.close()
+                print("数据库更新完成")
             
         # 确保所需目录存在
         required_dirs = ['uploads', 'processed', 'reports', 'logs']
@@ -1133,14 +1113,124 @@ with app.app_context():
     init_db()
 
 # 添加OPTIONS请求处理
-@app.route('/api/task/<task_id>', methods=['OPTIONS'])
-def handle_options(task_id):
+@app.route('/api/patients/<int:patient_id>', methods=['OPTIONS'])
+def handle_patient_options(patient_id):
     response = make_response()
-    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+    response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     response.headers.add('Access-Control-Allow-Credentials', 'true')
+    response.headers.add('Access-Control-Max-Age', '3600')
     return response
+
+def process_image(image_id):
+    try:
+        with app.app_context():
+            image = DBImage.query.get(image_id)
+            if not image:
+                logger.error(f"未找到图像记录: {image_id}")
+                return
+
+            # 更新处理状态
+            image.processing_status = 'processing'
+            db.session.commit()
+
+            # 获取原始文件路径
+            input_path = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
+            if not os.path.exists(input_path):
+                raise FileNotFoundError(f"未找到输入文件: {input_path}")
+
+            # 生成唯一的输出文件名
+            output_filename = f"processed_{uuid.uuid4()}.nii"
+            output_path = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
+
+            # 调用MATLAB脚本进行处理
+            matlab_script = os.path.join(app.config['MATLAB_SCRIPTS_FOLDER'], 'process_image.m')
+            matlab_cmd = [
+                'matlab',
+                '-nosplash',
+                '-nodesktop',
+                '-r',
+                f"process_image('{input_path}', '{output_path}'); exit;"
+            ]
+
+            # 执行MATLAB脚本
+            process = subprocess.Popen(
+                matlab_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = process.communicate()
+
+            # 解析处理日志，提取体积数据
+            volume_data = {}
+            for line in stdout.split('\n'):
+                if '体积:' in line:
+                    key, value = line.split(':')
+                    key = key.strip()
+                    value = float(value.strip().replace('mm³', ''))
+                    if 'gm' in key.lower():
+                        volume_data['gm_volume'] = value
+                    elif 'wm' in key.lower():
+                        volume_data['wm_volume'] = value
+                    elif 'csf' in key.lower():
+                        volume_data['csf_volume'] = value
+                    elif '总颅内' in key:
+                        volume_data['tiv_volume'] = value
+
+            # 更新图像记录
+            image.processed_filename = output_filename
+            image.processing_status = 'completed'
+            image.processing_log = stdout
+            image.processing_completed = datetime.utcnow()
+            
+            # 保存体积数据
+            if volume_data:
+                image.gm_volume = volume_data.get('gm_volume')
+                image.wm_volume = volume_data.get('wm_volume')
+                image.csf_volume = volume_data.get('csf_volume')
+                image.tiv_volume = volume_data.get('tiv_volume')
+            
+            db.session.commit()
+            logger.info(f"图像处理完成: {image_id}")
+
+    except Exception as e:
+        logger.error(f"处理图像时发生错误: {str(e)}")
+        logger.exception("详细错误信息:")
+        with app.app_context():
+            image = DBImage.query.get(image_id)
+            if image:
+                image.processing_status = 'failed'
+                image.processing_error = str(e)
+                db.session.commit()
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        
+        # 从请求头中获取token
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        
+        if not token:
+            return jsonify({'message': '缺少认证令牌'}), 401
+            
+        try:
+            # 验证token
+            data = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+            current_user = User.query.get(data['user_id'])
+            if not current_user:
+                return jsonify({'message': '用户不存在'}), 401
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': '认证令牌已过期'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': '无效的认证令牌'}), 401
+            
+        return f(current_user, *args, **kwargs)
+    return decorated
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
