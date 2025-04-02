@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, current_app, make_response
+from flask import Flask, request, jsonify, send_file, current_app, make_response, redirect
 import os
 from flask_sqlalchemy import SQLAlchemy
 import cv2
@@ -35,6 +35,7 @@ import shutil
 from app.routes.patient_routes import patient_bp
 from functools import wraps
 import jwt
+from io import BytesIO
 
 # 配置日志
 logging.basicConfig(
@@ -66,13 +67,11 @@ CORS(app, resources={
 # 注册蓝图
 app.register_blueprint(patient_bp, url_prefix='/api')
 
-# 添加全局CORS头
+# 全局请求处理
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    # 移除CORS头部设置，避免重复
+    # 其他非CORS相关的头部设置可以保留在这里
     return response
 
 # 获取当前文件的绝对路径
@@ -201,13 +200,13 @@ class TaskQueue:
         if task_id in self.tasks:
             self.tasks[task_id] = 'completed'
             self.progress[task_id] = 100
-            if results:
-                self.results[task_id] = results
+            self.results[task_id] = results
+            print(f"任务 {task_id} 已完成，结果: {results}")
 
     def fail_task(self, task_id):
         if task_id in self.tasks:
             self.tasks[task_id] = 'failed'
-
+            
     def get_results(self, task_id):
         return self.results.get(task_id)
 
@@ -323,6 +322,23 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
             
             % 运行批处理
             spm_jobman('run', matlabbatch);
+            
+            % 计算体积
+            V = spm_vol('{nifti_file}');
+            Y = spm_read_vols(V);
+            voxel_volume = abs(det(V.mat(1:3,1:3)));
+            
+            % 计算组织体积
+            gm_volume = sum(Y(:)) * voxel_volume;
+            wm_volume = sum(Y(:)) * voxel_volume;
+            csf_volume = sum(Y(:)) * voxel_volume;
+            
+            % 输出结果
+            fprintf('GM volume: %.2f\\n', gm_volume);
+            fprintf('WM volume: %.2f\\n', wm_volume);
+            fprintf('CSF volume: %.2f\\n', csf_volume);
+            fprintf('TIV volume: %.2f\\n', gm_volume + wm_volume + csf_volume);
+            
             exit;
         catch ME
             disp('错误信息:');
@@ -400,8 +416,8 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
             volumes[f"{tissue}_volume"] = float(tissue_volume)
             print(f"{tissue}体积: {tissue_volume:.2f}mm³")
 
-        volumes['tiv'] = float(sum(volumes.values()))
-        print(f"总颅内体积: {volumes['tiv']:.2f}mm³")
+        volumes['tiv_volume'] = float(sum(volumes.values()))
+        print(f"总颅内体积: {volumes['tiv_volume']:.2f}mm³")
 
         # 保存结果
         results_path = os.path.join(task_dir, 'results.json')
@@ -428,33 +444,50 @@ def process_dicom_image(full_filepath, task_dir, nifti_file, file_ext):
 def upload_image():
     try:
         current_user_id = get_jwt_identity()
+        print(f"\n=== 开始处理上传请求 ===")
+        print(f"当前用户ID: {current_user_id}")
+        print(f"请求头: {dict(request.headers)}")
+        print(f"表单数据: {request.form}")
+        print(f"文件: {request.files}")
         
         if 'file' not in request.files:
+            print("错误: 没有文件上传")
             return jsonify({'error': '没有文件上传'}), 400
             
         file = request.files['file']
         if file.filename == '':
+            print("错误: 没有选择文件")
             return jsonify({'error': '没有选择文件'}), 400
             
+        print(f"文件名: {file.filename}")
+        print(f"文件类型: {file.content_type}")
+        
         if not allowed_file(file.filename):
+            print(f"错误: 不支持的文件类型: {file.filename}")
             return jsonify({'error': '不支持的文件类型'}), 400
             
         # 获取患者信息
         patient_id = request.form.get('patient_id')
+        print(f"患者ID: {patient_id}")
+        
         if not patient_id:
+            print("错误: 未提供患者ID")
             return jsonify({'error': '未提供患者ID'}), 400
             
         # 验证患者是否属于当前用户
         patient = Patient.query.filter_by(id=patient_id, user_id=int(current_user_id)).first()
         if not patient:
+            print(f"错误: 患者不存在或无权访问 (ID: {patient_id})")
             return jsonify({'error': '患者不存在或无权访问'}), 403
             
         # 生成安全的文件名
         filename = secure_filename(file.filename)
         unique_filename = f"p{datetime.now().strftime('%Y%m%d_%H%M%S')}{filename}"
+        print(f"生成的文件名: {unique_filename}")
         
         # 保存文件
         file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename)
+        print(f"保存文件到: {file_path}")
         file.save(file_path)
         
         # 创建图像记录
@@ -463,12 +496,14 @@ def upload_image():
             original_filename=file.filename,
             patient_id=patient.id,
             check_date=datetime.now(),
-            processed_filename=None  # 使用processed_filename而不是processed
+            processed_filename=None
         )
         
         db.session.add(new_image)
         db.session.commit()
+        print(f"创建图像记录: {new_image.id}")
         
+        print("=== 上传成功 ===")
         return jsonify({
             'message': '文件上传成功',
             'image': new_image.to_dict()
@@ -476,6 +511,7 @@ def upload_image():
             
     except Exception as e:
         error_msg = f"上传文件时发生错误: {str(e)}"
+        print(f"\n=== 上传失败 ===")
         print(f"错误: {error_msg}")
         print(f"错误详情: {traceback.format_exc()}")
         return jsonify({'error': error_msg}), 500
@@ -525,6 +561,10 @@ def process_image():
         # 添加任务到队列
         task_queue.add_task(task_id)
         
+        # 保存任务ID到图像记录
+        image.task_id = task_id
+        db.session.commit()
+        
         # 创建后台线程处理图像
         def process_task():
             try:
@@ -534,13 +574,31 @@ def process_image():
                     results = process_dicom_image(file_path, task_dir, nifti_file, file_ext)
                     print(f"处理结果: {results}")
                     
-                    # 更新图像记录
-                    image.processed_filename = f"{task_id}/segmented.nii.gz"
-                    image.processed_at = datetime.now()
-                    image.processed = True
-                    image.tissue_stats = results
-                    db.session.commit()
-                    print(f"数据库记录已更新: {image.id}")
+                    # 更新图像记录 - 在这里重新查询Image对象，避免使用分离的实例
+                    image_instance = DBImage.query.get(image_id)
+                    if image_instance:
+                        image_instance.processed_filename = f"{task_id}/segmented.nii.gz"
+                        image_instance.processed = True
+                        image_instance.processing_completed = datetime.now()
+                        image_instance.gm_volume = results.get('gm_volume')
+                        image_instance.wm_volume = results.get('wm_volume')
+                        image_instance.csf_volume = results.get('csf_volume')
+                        image_instance.tiv_volume = results.get('tiv_volume')
+                        image_instance.processing_error = None
+                        db.session.commit()
+                        print(f"数据库记录已更新: {image_instance.id}")
+                        
+                        # 添加体积数据到日志，以便前端提取
+                        log_messages = [
+                            f"gm体积: {results.get('gm_volume')}mm³",
+                            f"wm体积: {results.get('wm_volume')}mm³",
+                            f"csf体积: {results.get('csf_volume')}mm³",
+                            f"总颅内体积: {results.get('tiv_volume')}mm³"
+                        ]
+                        for log in log_messages:
+                            print(log)
+                    else:
+                        print(f"无法找到图像记录: {image_id}")
                     
                     # 完成任务
                     task_queue.complete_task(task_id, results)
@@ -550,8 +608,11 @@ def process_image():
                 print(f"错误信息: {str(e)}")
                 print(f"错误堆栈:\n{traceback.format_exc()}")
                 with app.app_context():
-                    image.processing_error = str(e)
-                    db.session.commit()
+                    # 同样在这里重新查询Image对象
+                    image_instance = DBImage.query.get(image_id)
+                    if image_instance:
+                        image_instance.processing_error = str(e)
+                        db.session.commit()
                 task_queue.fail_task(task_id)
                 print(f"任务已标记为失败: {task_id}")
                 
@@ -692,11 +753,6 @@ def generate_preview():
         if file.filename == '':
             return jsonify({'status': 'error', 'message': '没有选择文件'})
             
-        # 设置matplotlib使用非交互式后端
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        
         # 临时保存文件
         temp_path = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_' + file.filename)
         file.save(temp_path)
@@ -715,17 +771,22 @@ def generate_preview():
                 middle_slice = img_data.shape[2] // 2
                 img_data = img_data[:, :, middle_slice]
                 
-            # 创建预览图
-            plt.figure(figsize=(10, 10))
-            plt.imshow(img_data, cmap='gray')
-            plt.axis('off')
+            # 归一化到0-255
+            if img_data.max() > img_data.min():
+                img_data = ((img_data - img_data.min()) * 255 / (img_data.max() - img_data.min())).astype(np.uint8)
+                
+            # 使用PIL处理图像
+            from PIL import Image
+            pil_img = Image.fromarray(img_data)
             
-            # 保存为内存中的图像
+            # 创建内存缓冲区
             import io
             import base64
             buf = io.BytesIO()
-            plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
-            plt.close()
+            
+            # 保存图像到缓冲区
+            pil_img.save(buf, format='PNG')
+            buf.seek(0)
             
             # 转换为base64
             image_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
@@ -917,113 +978,6 @@ def login():
         app.logger.error(f"登录错误: {str(e)}")
         return jsonify({'error': '登录失败，请重试'}), 500
 
-# 添加患者信息API
-@app.route('/api/patients', methods=['GET', 'POST'])
-@jwt_required()
-def patients():
-    try:
-        # 获取并记录请求信息
-        current_user_id = get_jwt_identity()
-        print(f"\n收到患者请求:")
-        print(f"Method: {request.method}")
-        print(f"Headers: {dict(request.headers)}")
-        print(f"当前用户ID: {current_user_id}")
-        
-        if request.method == 'POST':
-            print("\n处理POST请求 - 创建新患者")
-            try:
-                data = request.get_json()
-                print(f"接收到的数据: {data}")
-            except Exception as e:
-                print(f"解析JSON数据失败: {str(e)}")
-                return jsonify({'error': '无效的请求数据格式'}), 400
-
-            if not data:
-                print("请求数据为空")
-                return jsonify({'error': '请求数据为空'}), 400
-
-            # 验证必填字段
-            required_fields = ['name', 'patient_id', 'age', 'gender']
-            for field in required_fields:
-                if not data.get(field):
-                    print(f"缺少必填字段: {field}")
-                    return jsonify({'error': f'缺少必填字段: {field}'}), 400
-
-            # 验证患者ID是否已存在
-            existing_patient = Patient.query.filter_by(patient_id=data['patient_id']).first()
-            if existing_patient:
-                print(f"患者ID已存在: {data['patient_id']}")
-                return jsonify({'error': '患者ID已存在'}), 400
-
-            try:
-                print("\n创建新患者记录:")
-                print(f"姓名: {data['name']}")
-                print(f"患者ID: {data['patient_id']}")
-                print(f"年龄: {data['age']}")
-                print(f"性别: {data['gender']}")
-                print(f"用户ID: {current_user_id}")
-
-                # 创建新患者
-                new_patient = Patient(
-                    name=data['name'],
-                    patient_id=data['patient_id'],
-                    age=int(data['age']),
-                    gender=data['gender'],
-                    user_id=int(current_user_id)
-                )
-
-                # 保存到数据库
-                db.session.add(new_patient)
-                db.session.commit()
-                print(f"患者创建成功，ID: {new_patient.id}")
-
-                # 返回创建的患者信息
-                response_data = {
-                    'status': 'success',
-                    'message': '患者创建成功',
-                    'patient': {
-                        'id': new_patient.id,
-                        'name': new_patient.name,
-                        'patient_id': new_patient.patient_id,
-                        'age': new_patient.age,
-                        'gender': new_patient.gender,
-                        'created_at': new_patient.created_at.isoformat()
-                    }
-                }
-                print(f"返回响应: {response_data}")
-                return jsonify(response_data), 201
-
-            except Exception as e:
-                db.session.rollback()
-                print(f"创建患者失败: {str(e)}")
-                print(f"错误详情: {traceback.format_exc()}")
-                return jsonify({'error': f'创建患者失败: {str(e)}'}), 500
-
-        else:  # GET 请求
-            print("\n处理GET请求 - 获取患者列表")
-            try:
-                patients = Patient.query.filter_by(user_id=int(current_user_id)).all()
-                patients_list = [{
-                    'id': p.id,
-                    'name': p.name,
-                    'patient_id': p.patient_id,
-                    'age': p.age,
-                    'gender': p.gender,
-                    'created_at': p.created_at.isoformat()
-                } for p in patients]
-                
-                print(f"找到 {len(patients_list)} 个患者记录")
-                return jsonify({'patients': patients_list})
-            except Exception as e:
-                print(f"获取患者列表失败: {str(e)}")
-                print(f"错误详情: {traceback.format_exc()}")
-                return jsonify({'error': f'获取患者列表失败: {str(e)}'}), 500
-
-    except Exception as e:
-        print(f"处理患者请求时出错: {str(e)}")
-        print(f"错误详情: {traceback.format_exc()}")
-        return jsonify({'error': f'服务器内部错误: {str(e)}'}), 500
-
 # 错误处理中间件
 @app.errorhandler(Exception)
 def handle_error(error):
@@ -1112,98 +1066,94 @@ def init_db():
 with app.app_context():
     init_db()
 
-# 添加OPTIONS请求处理
-@app.route('/api/patients/<int:patient_id>', methods=['OPTIONS'])
-def handle_patient_options(patient_id):
-    response = make_response()
-    response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
-    response.headers.add('Access-Control-Max-Age', '3600')
-    return response
-
 def process_image(image_id):
     try:
-        with app.app_context():
-            image = DBImage.query.get(image_id)
-            if not image:
-                logger.error(f"未找到图像记录: {image_id}")
-                return
-
-            # 更新处理状态
-            image.processing_status = 'processing'
+        # 获取图像记录
+        image = DBImage.query.get(image_id)
+        if not image:
+            logger.error(f"未找到图像记录: {image_id}")
+            return False
+            
+        # 更新处理状态
+        image.processed = False
+        image.processing_error = None
+        db.session.commit()
+        
+        # 检查输入文件是否存在
+        input_file = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
+        if not os.path.exists(input_file):
+            logger.error(f"输入文件不存在: {input_file}")
+            image.processing_error = "输入文件不存在"
             db.session.commit()
-
-            # 获取原始文件路径
-            input_path = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
-            if not os.path.exists(input_path):
-                raise FileNotFoundError(f"未找到输入文件: {input_path}")
-
-            # 生成唯一的输出文件名
-            output_filename = f"processed_{uuid.uuid4()}.nii"
-            output_path = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
-
-            # 调用MATLAB脚本进行处理
-            matlab_script = os.path.join(app.config['MATLAB_SCRIPTS_FOLDER'], 'process_image.m')
-            matlab_cmd = [
-                'matlab',
-                '-nosplash',
-                '-nodesktop',
-                '-r',
-                f"process_image('{input_path}', '{output_path}'); exit;"
-            ]
-
-            # 执行MATLAB脚本
-            process = subprocess.Popen(
-                matlab_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            stdout, stderr = process.communicate()
-
-            # 解析处理日志，提取体积数据
-            volume_data = {}
-            for line in stdout.split('\n'):
-                if '体积:' in line:
-                    key, value = line.split(':')
-                    key = key.strip()
-                    value = float(value.strip().replace('mm³', ''))
-                    if 'gm' in key.lower():
-                        volume_data['gm_volume'] = value
-                    elif 'wm' in key.lower():
-                        volume_data['wm_volume'] = value
-                    elif 'csf' in key.lower():
-                        volume_data['csf_volume'] = value
-                    elif '总颅内' in key:
-                        volume_data['tiv_volume'] = value
-
+            return False
+            
+        # 生成唯一的输出文件名
+        output_filename = f"processed_{uuid.uuid4()}.nii"
+        output_file = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
+        
+        # 执行MATLAB脚本
+        matlab_script = os.path.join(app.config['CAT12_PATH'], 'cat_standalone_segment.m')
+        cmd = [
+            app.config['MATLAB_PATH'],
+            '-nosplash',
+            '-nodesktop',
+            '-r',
+            f"addpath('{app.config['SPM12_PATH']}'); addpath('{app.config['CAT12_PATH']}'); cat_standalone_segment('{input_file}', '{output_file}'); exit;"
+        ]
+        
+        logger.info(f"执行MATLAB命令: {' '.join(cmd)}")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        
+        # 解析输出日志
+        output_log = stdout.decode('utf-8')
+        logger.info(f"MATLAB输出: {output_log}")
+        
+        # 从输出中提取体积数据
+        try:
+            # 这里需要根据实际的MATLAB输出格式来解析数据
+            # 示例：假设输出中包含类似 "GM volume: 1234.56" 的行
+            gm_volume = None
+            wm_volume = None
+            csf_volume = None
+            tiv_volume = None
+            
+            for line in output_log.split('\n'):
+                if 'GM volume:' in line:
+                    gm_volume = float(line.split(':')[1].strip())
+                elif 'WM volume:' in line:
+                    wm_volume = float(line.split(':')[1].strip())
+                elif 'CSF volume:' in line:
+                    csf_volume = float(line.split(':')[1].strip())
+                elif 'TIV volume:' in line:
+                    tiv_volume = float(line.split(':')[1].strip())
+            
             # 更新图像记录
             image.processed_filename = output_filename
-            image.processing_status = 'completed'
-            image.processing_log = stdout
+            image.processed = True
             image.processing_completed = datetime.utcnow()
-            
-            # 保存体积数据
-            if volume_data:
-                image.gm_volume = volume_data.get('gm_volume')
-                image.wm_volume = volume_data.get('wm_volume')
-                image.csf_volume = volume_data.get('csf_volume')
-                image.tiv_volume = volume_data.get('tiv_volume')
+            image.gm_volume = gm_volume
+            image.wm_volume = wm_volume
+            image.csf_volume = csf_volume
+            image.tiv_volume = tiv_volume
+            image.processing_error = None
             
             db.session.commit()
             logger.info(f"图像处理完成: {image_id}")
-
+            return True
+            
+        except Exception as e:
+            logger.error(f"解析处理结果失败: {str(e)}")
+            image.processing_error = f"解析处理结果失败: {str(e)}"
+            db.session.commit()
+            return False
+            
     except Exception as e:
-        logger.error(f"处理图像时发生错误: {str(e)}")
-        logger.exception("详细错误信息:")
-        with app.app_context():
-            image = DBImage.query.get(image_id)
-            if image:
-                image.processing_status = 'failed'
-                image.processing_error = str(e)
-                db.session.commit()
+        logger.error(f"处理图像时出错: {str(e)}")
+        if image:
+            image.processing_error = str(e)
+            db.session.commit()
+        return False
 
 def token_required(f):
     @wraps(f)
@@ -1231,6 +1181,187 @@ def token_required(f):
             
         return f(current_user, *args, **kwargs)
     return decorated
+
+@app.route('/api/preview/<int:image_id>', methods=['GET', 'OPTIONS'])
+def get_image_preview(image_id):
+    if request.method == 'OPTIONS':
+        return '', 200
+        
+    try:
+        # 获取图像记录
+        image = DBImage.query.get(image_id)
+        if not image:
+            return jsonify({'error': '图像不存在'}), 404
+
+        # 验证患者权限
+        patient = Patient.query.get(image.patient_id)
+        if not patient:
+            return jsonify({'error': '患者不存在'}), 404
+
+        # 构建文件路径
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
+        if not os.path.exists(file_path):
+            # 如果原始文件不存在但有task_id，尝试获取处理后的图像
+            if image.task_id and image.processed:
+                type_param = request.args.get('type', 'gm')
+                return redirect(f"/api/preview/{image.task_id}?type={type_param}")
+            return jsonify({'error': '图像文件不存在'}), 404
+
+        # 读取图像文件
+        if image.filename.lower().endswith('.dcm'):
+            ds = pydicom.dcmread(file_path)
+            img_data = ds.pixel_array
+        else:
+            img = nib.load(file_path)
+            img_data = img.get_fdata()
+
+        # 如果是3D数据，取中间切片
+        if len(img_data.shape) == 3:
+            mid_slice = img_data.shape[2] // 2
+            img_data = img_data[:, :, mid_slice]
+
+        # 归一化到0-255
+        if img_data.max() > img_data.min():
+            img_data = ((img_data - img_data.min()) * 255 / (img_data.max() - img_data.min())).astype('uint8')
+
+        # 转换为PNG
+        img = PILImage.fromarray(img_data)
+        
+        # 保存为临时PNG文件
+        temp_path = os.path.join(app.config['UPLOAD_FOLDER'], f"preview_{image_id}.png")
+        img.save(temp_path, 'PNG')
+        
+        # 读取PNG文件并转换为base64
+        with open(temp_path, 'rb') as f:
+            img_data = base64.b64encode(f.read()).decode()
+            
+        # 删除临时文件
+        os.remove(temp_path)
+        
+        return jsonify({
+            'status': 'success',
+            'image': img_data
+        })
+
+    except Exception as e:
+        print(f"获取预览图错误: {str(e)}")
+        print(f"错误详情: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/preview/<task_id>', methods=['GET', 'OPTIONS'])
+def get_processed_preview(task_id):
+    """获取处理后的图像预览"""
+    # 跨域预检请求处理
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
+    
+    try:
+        image_type = request.args.get('type', 'gm')  # 默认获取灰质图像
+        logger.info(f"请求处理后的图像预览 - 任务ID: {task_id}, 类型: {image_type}")
+        
+        # 验证image_type参数
+        valid_types = ['gm', 'wm', 'csf', 'original']
+        if image_type not in valid_types:
+            logger.warning(f"无效的图像类型: {image_type}")
+            return jsonify({
+                'status': 'error',
+                'message': f'无效的图像类型。支持的类型: {", ".join(valid_types)}'
+            }), 400
+            
+        # 根据图像类型确定文件名
+        filename = None
+        if image_type == 'gm':
+            filename = 'p1input.nii'  # 灰质
+        elif image_type == 'wm':
+            filename = 'p2input.nii'  # 白质
+        elif image_type == 'csf':
+            filename = 'p3input.nii'  # 脑脊液
+        elif image_type == 'original':
+            filename = 'p0input.nii'  # 原始图像
+            # 如果p0不存在，尝试使用其他可能的文件名
+            fallback_files = ['input.nii', 'wminput.nii']
+        
+        # 构建文件路径
+        task_dir = os.path.join(current_app.config['PROCESSED_FOLDER'], task_id, 'mri')
+        file_path = os.path.join(task_dir, filename)
+        
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            logger.warning(f"文件不存在: {file_path}")
+            
+            # 如果是original类型且主文件不存在，尝试使用备用文件
+            if image_type == 'original':
+                for fallback_file in fallback_files:
+                    fallback_path = os.path.join(task_dir, fallback_file)
+                    if os.path.exists(fallback_path):
+                        logger.info(f"使用备用文件: {fallback_path}")
+                        file_path = fallback_path
+                        break
+                    
+            # 如果所有选项都不存在，返回错误
+            if not os.path.exists(file_path):
+                return jsonify({
+                    'status': 'error',
+                    'message': f'找不到{image_type}图像文件'
+                }), 404
+        
+        logger.info(f"找到文件: {file_path}")
+        
+        # 使用nibabel读取NIfTI文件
+        nii_img = nib.load(file_path)
+        nii_data = nii_img.get_fdata()
+        
+        logger.info(f"成功读取NIfTI文件，形状: {nii_data.shape}")
+        
+        # 如果是3D数据，取中间的切片作为预览
+        if len(nii_data.shape) == 3:
+            middle_slice = nii_data.shape[2] // 2
+            image_data = nii_data[:, :, middle_slice]
+            logger.info(f"提取3D数据的中间切片，索引: {middle_slice}")
+        else:
+            image_data = nii_data
+        
+        # 归一化数据到0-255
+        image_data = (image_data - image_data.min()) / (image_data.max() - image_data.min()) * 255
+        image_data = image_data.astype(np.uint8)
+        logger.info(f"数据归一化完成，范围: [0, 255]")
+        
+        # 创建PIL图像
+        image = PILImage.fromarray(image_data)
+        logger.info(f"成功创建PIL图像，大小: {image.size}")
+        
+        # 将图像编码为base64
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        logger.info(f"成功保存图像到缓冲区")
+        
+        img_str = base64.b64encode(buffered.getvalue()).decode('ascii')
+        logger.info(f"成功编码为base64，数据长度: {len(img_str)}")
+        
+        logger.info(f"成功处理预览请求 - 任务ID: {task_id}, 类型: {image_type}")
+        response = jsonify({
+            'status': 'success',
+            'image': img_str
+        })
+        
+        # 添加CORS头
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"处理图像预览时出错: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
