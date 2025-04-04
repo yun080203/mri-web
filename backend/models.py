@@ -71,6 +71,7 @@ class Image(db.Model):
     csf_volume = db.Column(db.Float)
     tiv_volume = db.Column(db.Float)
     processing_completed = db.Column(db.DateTime)
+    task_id = db.Column(db.String(255))
 
     def __repr__(self):
         return f'<Image {self.filename}>'
@@ -92,5 +93,6 @@ class Image(db.Model):
             'wm_volume': self.wm_volume,
             'csf_volume': self.csf_volume,
             'tiv_volume': self.tiv_volume,
-            'processing_completed': self.processing_completed.isoformat() if self.processing_completed else None
+            'processing_completed': self.processing_completed.isoformat() if self.processing_completed else None,
+            'task_id': self.task_id
         } 

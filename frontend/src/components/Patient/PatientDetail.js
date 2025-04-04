@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import '../../styles/Patient.css';
-import { Button, Modal, message, Spin } from 'antd';
+import { Button, Modal, message, Spin, Tooltip } from 'antd';
 import { API_BASE, FALLBACK_IMAGE } from '../../utils/constants';
+import { CompareOutlined } from '@ant-design/icons';
 
 function PatientDetail() {
-    const { id } = useParams();
+    const { patientId } = useParams();
     const navigate = useNavigate();
     const [patient, setPatient] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -18,35 +19,7 @@ function PatientDetail() {
     const [imageErrors, setImageErrors] = useState({});
     const [segmentationImages, setSegmentationImages] = useState({});
 
-    useEffect(() => {
-        fetchPatientDetails();
-        
-        // 设置定时刷新，但仅当有正在处理的图像时才刷新
-        const interval = setInterval(() => {
-            // 检查是否有正在处理的图像
-            if (patient && patient.images && patient.images.some(img => !img.processed && !img.processing_error)) {
-                console.log('发现正在处理的图像，继续轮询...');
-                fetchPatientDetails();
-            } else {
-                // 如果没有正在处理的图像且定时器存在，清除定时器
-                if (refreshInterval) {
-                    console.log('没有正在处理的图像，停止轮询');
-                    clearInterval(refreshInterval);
-                    setRefreshInterval(null);
-                }
-            }
-        }, 5000);
-        
-        setRefreshInterval(interval);
-        
-        return () => {
-            if (refreshInterval) {
-                clearInterval(refreshInterval);
-            }
-        };
-    }, [id]);
-
-    const fetchPatientDetails = async () => {
+    const fetchPatientDetails = useCallback(async () => {
         try {
             setLoading(true);
             setError('');
@@ -57,7 +30,7 @@ function PatientDetail() {
                 return;
             }
 
-            const response = await axios.get(`${API_BASE}/api/patients/${id}`, {
+            const response = await axios.get(`${API_BASE}/api/patients/${patientId}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -100,18 +73,16 @@ function PatientDetail() {
                 
                 setPatient(updatedPatient);
                 
-                // 检查是否有正在处理的图像
+                // 检查是否有正在处理的图像 - 仅供日志记录
                 const hasProcessingImages = response.data.patient.images.some(img => 
                     !img.processed && !img.processing_error
                 );
                 
-                // 如果没有正在处理的图像，停止刷新
-                if (!hasProcessingImages && refreshInterval) {
-                    console.log('所有图像处理完成，停止刷新');
-                    clearInterval(refreshInterval);
-                    setRefreshInterval(null);
-                } else if (hasProcessingImages) {
-                    console.log('存在正在处理的图像，继续刷新');
+                // 记录日志，但不在这里管理定时器
+                if (hasProcessingImages) {
+                    console.log('存在正在处理的图像，将继续刷新');
+                } else {
+                    console.log('所有图像处理完成');
                 }
             } else {
                 setError('获取患者数据失败');
@@ -128,7 +99,54 @@ function PatientDetail() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [patientId, navigate, patient]);
+
+    useEffect(() => {
+        // 首次加载页面时获取数据
+        fetchPatientDetails();
+        
+        // 防止重复设置定时器导致的内存泄漏
+        return () => {
+            if (refreshInterval) {
+                console.log('组件卸载，清除轮询定时器');
+                clearInterval(refreshInterval);
+            }
+        };
+    }, [patientId]); // 仅在ID变化时重新加载数据
+
+    // 分离轮询逻辑到单独的useEffect
+    useEffect(() => {
+        // 清除已有的定时器，避免重复
+        if (refreshInterval) {
+            clearInterval(refreshInterval);
+            setRefreshInterval(null);
+        }
+        
+        // 检查是否需要设置轮询 - 有未处理完成的图像
+        const hasProcessingImages = patient && 
+            patient.images && 
+            patient.images.some(img => img.task_id && !img.processed && !img.processing_error);
+        
+        if (!hasProcessingImages) {
+            console.log('没有需要轮询的图像，不创建轮询');
+            return;
+        }
+        
+        console.log('创建新轮询定时器...');
+        // 设置新的轮询
+        const interval = setInterval(() => {
+            console.log('轮询执行中，获取最新患者数据...');
+            fetchPatientDetails();
+        }, 5000);
+        
+        setRefreshInterval(interval);
+        
+        return () => {
+            if (interval) {
+                clearInterval(interval);
+            }
+        };
+    }, [patient, fetchPatientDetails]);
 
     const handleDelete = async () => {
         try {
@@ -138,7 +156,7 @@ function PatientDetail() {
                 return;
             }
 
-            const response = await axios.delete(`${API_BASE}/api/patients/${id}`, {
+            const response = await axios.delete(`${API_BASE}/api/patients/${patientId}/delete`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -243,33 +261,76 @@ function PatientDetail() {
         }
     };
 
-    // 当选择图像或图像列表变化时，加载分割图像
-    useEffect(() => {
-        if (patient && patient.images && patient.images.length > 0) {
-            const processedImages = patient.images.filter(img => img.processed && img.task_id);
-            
-            // 初始化加载状态
-            const loadingStates = {};
-            patient.images.forEach(img => {
-                if (img.processed && img.task_id) {
-                    console.log(`图像 ${img.id} 已处理，task_id: ${img.task_id}`);
-                    // 设置该图像的三种组织类型的加载状态
-                    loadingStates[`${img.id}_gm`] = true;
-                    loadingStates[`${img.id}_wm`] = true;
-                    loadingStates[`${img.id}_csf`] = true;
-                    
-                    // 为每个处理完成的图像加载分割图像
-                    loadSegmentationImages(img);
-                } else {
-                    console.log(`图像 ${img.id} ${img.processed ? '已处理但无task_id' : '未处理'}`);
-                }
-            });
-            setImageLoading(loadingStates);
+    // 获取分割图像 - 移动到前面以避免使用前未定义的问题
+    const fetchSegmentationImage = useCallback(async (taskId, type) => {
+        if (!taskId) {
+            console.error(`无法获取${type}图像：缺少task_id`);
+            return null;
         }
-    }, [patient]);
+
+        console.log(`尝试获取分割图像，taskId: ${taskId}, 类型: ${type}`);
+        
+        // 定义重试次数和延迟
+        const maxRetries = 3;
+        let retryCount = 0;
+        
+        while (retryCount < maxRetries) {
+            try {
+                const response = await fetch(`${API_BASE}/api/preview/${taskId}?type=${type}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                console.log(`API响应状态: ${response.status}, 内容类型: ${response.headers.get('content-type')}`);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`获取${type}图像失败: ${response.status} - ${errorText}`);
+                    retryCount++;
+                    if (retryCount < maxRetries) {
+                        console.log(`重试 (${retryCount}/${maxRetries})...`);
+                        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                        continue;
+                    }
+                    return null;
+                }
+
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const data = await response.json();
+                    console.log(`成功获取${type}图像数据`, data);
+                    
+                    if (data.status === 'success' && data.image) {
+                        return `data:image/png;base64,${data.image}`;
+                    } else {
+                        console.error(`图像数据格式错误:`, data);
+                        return null;
+                    }
+                } else {
+                    console.error(`响应不是JSON格式: ${contentType}`);
+                    const text = await response.text();
+                    console.error(`响应内容: ${text.substring(0, 100)}...`);
+                    return null;
+                }
+            } catch (error) {
+                console.error(`获取${type}图像出错:`, error);
+                retryCount++;
+                if (retryCount < maxRetries) {
+                    console.log(`重试 (${retryCount}/${maxRetries})...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                } else {
+                    return null;
+                }
+            }
+        }
+        
+        return null;
+    }, []);
     
     // 添加一个新的函数用于获取原始MRI预览图
-    const fetchOriginalImage = async (taskId) => {
+    const fetchOriginalImage = useCallback(async (taskId) => {
         if (!taskId) {
             console.error('无法获取原始图像预览：缺少task_id');
             return null;
@@ -335,10 +396,10 @@ function PatientDetail() {
         }
         
         return null;
-    };
+    }, []);
 
     // 修改加载分割图像的函数，增加加载原始MRI预览
-    const loadSegmentationImages = async (image) => {
+    const loadSegmentationImages = useCallback(async (image) => {
         if (!image || !image.task_id) {
             console.log('未选择图像或图像没有关联的任务ID');
             return;
@@ -440,75 +501,105 @@ function PatientDetail() {
                 [`${image.id}_csf`]: true
             }));
         }
-    };
-
-    // 获取分割图像
-    const fetchSegmentationImage = async (taskId, type) => {
+    }, [fetchOriginalImage, fetchSegmentationImage]);
+    
+    // 添加直接轮询任务状态的函数
+    const pollTaskStatus = useCallback(async (taskId, imageId) => {
         if (!taskId) {
-            console.error(`无法获取${type}图像：缺少task_id`);
-            return null;
+            console.error('无法轮询任务状态：缺少任务ID');
+            return;
         }
 
-        console.log(`尝试获取分割图像，taskId: ${taskId}, 类型: ${type}`);
-        
-        // 定义重试次数和延迟
-        const maxRetries = 3;
-        let retryCount = 0;
-        
-        while (retryCount < maxRetries) {
-            try {
-                const response = await fetch(`${API_BASE}/api/preview/${taskId}?type=${type}`, {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                });
+        try {
+            console.log(`轮询任务状态: ${taskId}`);
+            const token = localStorage.getItem('token');
+            const response = await axios.get(`${API_BASE}/api/status/${taskId}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
 
-                console.log(`API响应状态: ${response.status}, 内容类型: ${response.headers.get('content-type')}`);
+            console.log('收到状态响应:', response.data);
+            
+            // 如果任务已完成或失败，更新图像状态
+            if (response.data.status === 'completed') {
+                // 获取最新的患者数据，确保图像信息是最新的
+                fetchPatientDetails();
                 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error(`获取${type}图像失败: ${response.status} - ${errorText}`);
-                    retryCount++;
-                    if (retryCount < maxRetries) {
-                        console.log(`重试 (${retryCount}/${maxRetries})...`);
-                        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                        continue;
+                // 加载分割图像
+                if (patient) {
+                    const updatedImage = patient.images.find(img => img.id === imageId);
+                    if (updatedImage) {
+                        loadSegmentationImages(updatedImage);
                     }
-                    return null;
                 }
-
-                const contentType = response.headers.get('content-type');
-                if (contentType && contentType.includes('application/json')) {
-                    const data = await response.json();
-                    console.log(`成功获取${type}图像数据`, data);
-                    
-                    if (data.status === 'success' && data.image) {
-                        return `data:image/png;base64,${data.image}`;
-                    } else {
-                        console.error(`图像数据格式错误:`, data);
-                        return null;
-                    }
-                } else {
-                    console.error(`响应不是JSON格式: ${contentType}`);
-                    const text = await response.text();
-                    console.error(`响应内容: ${text.substring(0, 100)}...`);
-                    return null;
-                }
-            } catch (error) {
-                console.error(`获取${type}图像出错:`, error);
-                retryCount++;
-                if (retryCount < maxRetries) {
-                    console.log(`重试 (${retryCount}/${maxRetries})...`);
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                } else {
-                    return null;
+            } else if (response.data.status === 'failed') {
+                console.error('图像处理失败:', response.data.error);
+                fetchPatientDetails();
+            } else {
+                // 如果仍在处理中（或其他状态），继续轮询
+                setTimeout(() => pollTaskStatus(taskId, imageId), 5000);
+            }
+        } catch (error) {
+            console.error('轮询任务状态失败:', error);
+            
+            // 即使出错，也继续轮询，防止因临时网络问题而停止轮询
+            console.log('轮询出错，5秒后重试...');
+            setTimeout(() => pollTaskStatus(taskId, imageId), 5000);
+        }
+    }, [fetchPatientDetails, patient, loadSegmentationImages]);
+    
+    // 添加检查正在处理中的图像并开始轮询的函数
+    const checkProcessingImages = useCallback(() => {
+        if (!patient || !patient.images) return;
+        
+        // 查找所有正在处理的图像（已有task_id但尚未完成处理）
+        const processingImages = patient.images.filter(img => 
+            img.task_id && !img.processed && !img.processing_error
+        );
+        
+        // 为每个处理中的图像启动轮询
+        processingImages.forEach(img => {
+            console.log(`开始轮询任务 ${img.task_id} 的状态`);
+            pollTaskStatus(img.task_id, img.id);
+        });
+    }, [patient, pollTaskStatus]);
+    
+    // 当选择图像或图像列表变化时，加载分割图像
+    useEffect(() => {
+        if (patient && patient.images && patient.images.length > 0) {
+            const processedImages = patient.images.filter(img => img.processed && img.task_id);
+            
+            // 初始化加载状态
+            const loadingStates = {};
+            for (const img of processedImages) {
+                console.log(`图像 ${img.id} 已处理，task_id: ${img.task_id}`);
+                // 设置该图像的三种组织类型的加载状态
+                loadingStates[`${img.id}_gm`] = true;
+                loadingStates[`${img.id}_wm`] = true;
+                loadingStates[`${img.id}_csf`] = true;
+                
+                // 为每个处理完成的图像加载分割图像
+                loadSegmentationImages(img);
+            }
+            
+            for (const img of patient.images) {
+                if (!img.processed) {
+                    console.log(`图像 ${img.id} ${img.processed ? '已处理但无task_id' : '未处理'}`);
                 }
             }
+            
+            setImageLoading(loadingStates);
         }
-        
-        return null;
-    };
+    }, [patient, loadSegmentationImages]);
+
+    // 在获取患者详情后检查处理中的图像
+    useEffect(() => {
+        if (patient) {
+            checkProcessingImages();
+        }
+    }, [patient, checkProcessingImages]);
 
     if (loading) return <div className="loading">加载中...</div>;
     if (error) return <div className="error-message">{error}</div>;

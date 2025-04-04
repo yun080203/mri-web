@@ -59,8 +59,10 @@ CORS(app, resources={
     r"/api/*": {
         "origins": ["http://localhost:3000"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
+        "allow_headers": ["Content-Type", "Authorization", "Accept"],
+        "expose_headers": ["Content-Type", "Content-Length", "Authorization"],
+        "supports_credentials": True,
+        "max_age": 3600
     }
 })
 
@@ -70,8 +72,7 @@ app.register_blueprint(patient_bp, url_prefix='/api')
 # 全局请求处理
 @app.after_request
 def after_request(response):
-    # 移除CORS头部设置，避免重复
-    # 其他非CORS相关的头部设置可以保留在这里
+    # 不再添加CORS头部，完全交由flask-cors处理
     return response
 
 # 获取当前文件的绝对路径
@@ -683,21 +684,21 @@ def get_task_status_new(task_id):
 def get_all_tasks():
     try:
         print("获取所有任务状态")
+        tasks_list = []
         
-        # 模拟任务列表
+        # 从任务队列获取所有任务
+        for task_id, task_info in task_queue.tasks.items():
+            task_data = {
+                'task_id': task_id,
+                'status': task_info.status.value if hasattr(task_info, 'status') else 'unknown',
+                'progress': task_info.progress if hasattr(task_info, 'progress') else 0,
+                'results': task_info.results if hasattr(task_info, 'results') else None,
+                'error': task_info.error if hasattr(task_info, 'error') else None
+            }
+            tasks_list.append(task_data)
+        
         response = {
-            'tasks': [
-                {
-                    'task_id': 'task-1',
-                    'status': 'completed',
-                    'message': '处理完成'
-                },
-                {
-                    'task_id': 'task-2',
-                    'status': 'processing',
-                    'message': '正在处理'
-                }
-            ]
+            'tasks': tasks_list
         }
         print(f"返回响应: {response}")
         return jsonify(response)
@@ -707,6 +708,105 @@ def get_all_tasks():
         print(f"错误: {error_msg}")
         print(f"错误详情: {traceback.format_exc()}")
         return jsonify({'error': error_msg}), 500
+
+@app.route('/api/tasks/<task_id>', methods=['GET', 'OPTIONS'])
+def get_task_by_id(task_id):
+    """获取特定任务ID的详细信息"""
+    # 处理CORS预检请求
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        return response
+        
+    try:
+        print(f"\n=== 获取任务详情 ===")
+        print(f"任务ID: {task_id}")
+        
+        # 检查任务是否存在
+        if task_id not in task_queue.tasks:
+            print(f"任务不存在: {task_id}")
+            return jsonify({'error': '任务不存在'}), 404
+            
+        # 获取任务信息
+        task_info = task_queue.tasks.get(task_id)
+        
+        # 获取处理结果
+        results_file = os.path.join(app.config['PROCESSED_FOLDER'], task_id, 'results.json')
+        results = None
+        
+        if os.path.exists(results_file):
+            try:
+                with open(results_file, 'r') as f:
+                    results = json.load(f)
+                print(f"找到结果文件: {results_file}")
+            except Exception as e:
+                print(f"读取结果文件失败: {str(e)}")
+        else:
+            # 尝试从task_info获取结果
+            results = task_info.results if hasattr(task_info, 'results') else None
+        
+        # 获取MATLAB日志
+        log_file = os.path.join(app.config['PROCESSED_FOLDER'], task_id, 'matlab.log')
+        matlab_log = None
+        
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    matlab_log = f.read()
+                print(f"找到日志文件: {log_file}")
+            except Exception as e:
+                print(f"读取日志文件失败: {str(e)}")
+        
+        # 返回任务信息
+        response_data = {
+            'task_id': task_id,
+            'status': task_info.status.value if hasattr(task_info, 'status') else 'unknown',
+            'progress': task_info.progress if hasattr(task_info, 'progress') else 0,
+            'results': results,
+            'matlab_log': matlab_log,
+            'error': task_info.error if hasattr(task_info, 'error') else None,
+            'start_time': task_info.start_time.isoformat() if hasattr(task_info, 'start_time') and task_info.start_time else None,
+            'end_time': task_info.end_time.isoformat() if hasattr(task_info, 'end_time') and task_info.end_time else None
+        }
+        
+        # 添加处理结果的图像路径
+        if results:
+            # 检查分割图像是否存在
+            mri_dir = os.path.join(app.config['PROCESSED_FOLDER'], task_id, 'mri')
+            if os.path.exists(mri_dir):
+                response_data['images'] = {
+                    'gm': f"/api/preview/{task_id}?type=gm",
+                    'wm': f"/api/preview/{task_id}?type=wm",
+                    'csf': f"/api/preview/{task_id}?type=csf",
+                    'original': f"/api/preview/{task_id}?type=original"
+                }
+        
+        print(f"返回任务详情: {response_data}")
+        
+        response = jsonify(response_data)
+        # 添加CORS头
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        
+        return response
+        
+    except Exception as e:
+        print(f"获取任务详情失败: {str(e)}")
+        print(f"错误详情: {traceback.format_exc()}")
+        
+        error_response = jsonify({
+            'error': str(e)
+        }), 500
+        
+        # 添加CORS头到错误响应
+        error_response[0].headers.add('Access-Control-Allow-Origin', '*')
+        error_response[0].headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        error_response[0].headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        
+        return error_response
 
 @app.route('/')
 def index():
@@ -743,8 +843,16 @@ def get_task_progress(task_id):
             'message': str(e)
         }), 500
 
-@app.route('/api/preview', methods=['POST'])
+@app.route('/api/preview', methods=['POST', 'OPTIONS'])
 def generate_preview():
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'POST,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    
     try:
         if 'file' not in request.files:
             return jsonify({'status': 'error', 'message': '没有文件被上传'})
@@ -791,10 +899,18 @@ def generate_preview():
             # 转换为base64
             image_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
             
-            return jsonify({
+            response = jsonify({
                 'status': 'success',
                 'image': image_base64
             })
+            
+            # 添加CORS头
+            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+            response.headers.add('Access-Control-Allow-Methods', 'POST,OPTIONS')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            
+            return response
             
         finally:
             # 清理临时文件
@@ -808,9 +924,17 @@ def generate_preview():
             'message': f'生成预览图失败: {str(e)}'
         })
 
-@app.route('/api/processed/<task_id>/<filename>', methods=['GET'])
+@app.route('/api/processed/<task_id>/<filename>', methods=['GET', 'OPTIONS'])
 def get_processed_image(task_id, filename):
     """获取处理后的图像"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    
     try:
         # 构建文件路径
         if filename == 'segmented.nii.gz':
@@ -855,10 +979,18 @@ def get_processed_image(task_id, filename):
         # 删除临时文件
         os.remove(temp_path)
         
-        return jsonify({
+        response = jsonify({
             'status': 'success',
             'image': img_data
         })
+        
+        # 添加CORS头
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        
+        return response
     except Exception as e:
         print(f"获取处理后图像错误: {str(e)}")
         print(f"错误详情: {traceback.format_exc()}")
@@ -867,9 +999,17 @@ def get_processed_image(task_id, filename):
             'message': str(e)
         }), 500
 
-@app.route('/api/results/<task_id>', methods=['GET'])
+@app.route('/api/results/<task_id>', methods=['GET', 'OPTIONS'])
 def get_analysis_results(task_id):
     """获取分析结果"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    
     try:
         # 构建结果文件路径
         result_file = os.path.join(app.config['PROCESSED_FOLDER'], task_id, 'results.json')
@@ -886,10 +1026,18 @@ def get_analysis_results(task_id):
         with open(result_file, 'r') as f:
             results = json.load(f)
             
-        return jsonify({
+        response = jsonify({
             'status': 'success',
             'results': results
         })
+        
+        # 添加CORS头
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        
+        return response
     except Exception as e:
         print(f"获取分析结果错误: {str(e)}")
         print(f"错误详情: {traceback.format_exc()}")
@@ -1185,7 +1333,12 @@ def token_required(f):
 @app.route('/api/preview/<int:image_id>', methods=['GET', 'OPTIONS'])
 def get_image_preview(image_id):
     if request.method == 'OPTIONS':
-        return '', 200
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
         
     try:
         # 获取图像记录
@@ -1238,10 +1391,18 @@ def get_image_preview(image_id):
         # 删除临时文件
         os.remove(temp_path)
         
-        return jsonify({
+        response = jsonify({
             'status': 'success',
             'image': img_data
         })
+        
+        # 添加CORS头
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        
+        return response
 
     except Exception as e:
         print(f"获取预览图错误: {str(e)}")
@@ -1254,9 +1415,10 @@ def get_processed_preview(task_id):
     # 跨域预检请求处理
     if request.method == 'OPTIONS':
         response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
         response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
     
     try:
@@ -1349,9 +1511,10 @@ def get_processed_preview(task_id):
         })
         
         # 添加CORS头
-        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
         response.headers.add('Access-Control-Allow-Methods', 'GET,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
         
         return response
         
@@ -1362,6 +1525,200 @@ def get_processed_preview(task_id):
             'status': 'error',
             'message': str(e)
         }), 500
+
+# 添加图像数据API路由
+@app.route('/api/images/<int:image_id>', methods=['GET', 'OPTIONS'])
+def get_image_data(image_id):
+    if request.method == 'OPTIONS':
+        # 处理预检请求 - 不需要手动添加CORS头
+        return '', 200
+
+    try:
+        # 查询图像数据
+        image = DBImage.query.get(image_id)
+        if not image:
+            return jsonify({
+                'success': False,
+                'error': '未找到图像数据'
+            }), 404
+            
+        # 获取预览图像
+        preview_url = f"/api/preview/{image.id}"
+        
+        # 构建响应数据
+        image_data = {
+            'id': image.id,
+            'filename': image.filename,
+            'original_filename': image.original_filename,
+            'patient_id': image.patient_id,
+            'check_date': image.check_date.isoformat() if image.check_date else None,
+            'processed': image.processed,
+            'task_id': image.task_id,
+            'preview_url': preview_url,
+            'created_at': image.created_at.isoformat() if image.created_at else None,
+        }
+        
+        # 如果已处理，添加分析结果数据
+        if image.processed:
+            image_data.update({
+                'gm_volume': image.gm_volume,
+                'wm_volume': image.wm_volume,
+                'csf_volume': image.csf_volume,
+                'tiv_volume': image.tiv_volume,
+                'processing_completed': image.processing_completed.isoformat() if image.processing_completed else None,
+            })
+            
+            # 添加分割图像URLs
+            if image.task_id:
+                image_data['segment_images'] = {
+                    'gm': f"/api/preview/{image.task_id}?type=gm",
+                    'wm': f"/api/preview/{image.task_id}?type=wm",
+                    'csf': f"/api/preview/{image.task_id}?type=csf"
+                }
+        
+        return jsonify({
+            'success': True,
+            'image': image_data
+        })
+            
+    except Exception as e:
+        app.logger.error(f"获取图像数据失败: {str(e)}")
+        app.logger.error(f"错误详情: {traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': f'获取图像数据失败: {str(e)}'
+        }), 500
+
+# 添加报告生成和下载路由
+@app.route('/api/reports/<int:patient_id>', methods=['GET'])
+@jwt_required()
+def generate_patient_report(patient_id):
+    try:
+        # 获取当前用户ID
+        current_user_id = get_jwt_identity()
+        logger.info(f"生成患者报告，患者ID: {patient_id}, 用户ID: {current_user_id}")
+        
+        # 查找患者及其图像
+        patient = Patient.query.filter_by(id=patient_id, user_id=current_user_id).first()
+        if not patient:
+            logger.warning(f"未找到患者: {patient_id}")
+            return jsonify({'error': '未找到患者'}), 404
+        
+        # 创建PDF文件
+        report_filename = f"patient_report_{patient_id}_{int(time.time())}.pdf"
+        report_path = os.path.join(app.config['REPORTS_FOLDER'], report_filename)
+        
+        # 使用reportlab生成PDF
+        doc = SimpleDocTemplate(report_path, pagesize=letter)
+        styles = getSampleStyleSheet()
+        elements = []
+        
+        # 添加标题
+        title_style = styles['Heading1']
+        title = Paragraph(f"患者脑组织分析报告", title_style)
+        elements.append(title)
+        elements.append(Spacer(1, 20))
+        
+        # 添加患者信息
+        patient_info = [
+            ["姓名", patient.name],
+            ["患者ID", patient.patient_id],
+            ["年龄", str(patient.age)],
+            ["性别", patient.gender],
+            ["报告生成日期", datetime.now().strftime("%Y-%m-%d %H:%M")]
+        ]
+        
+        patient_table = Table(patient_info, colWidths=[100, 300])
+        patient_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('BACKGROUND', (1, 0), (-1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        elements.append(Paragraph("患者基本信息", styles['Heading2']))
+        elements.append(Spacer(1, 10))
+        elements.append(patient_table)
+        elements.append(Spacer(1, 20))
+        
+        # 添加图像信息和分析结果
+        if patient.images:
+            elements.append(Paragraph("脑组织体积分析结果", styles['Heading2']))
+            elements.append(Spacer(1, 10))
+            
+            for idx, image in enumerate(patient.images):
+                if image.processed and image.gm_volume is not None:
+                    elements.append(Paragraph(f"图像 {idx+1}: {image.original_filename}", styles['Heading3']))
+                    elements.append(Spacer(1, 5))
+                    
+                    # 计算百分比
+                    gm_percent = (image.gm_volume / image.tiv_volume * 100) if image.tiv_volume else 0
+                    wm_percent = (image.wm_volume / image.tiv_volume * 100) if image.tiv_volume else 0
+                    csf_percent = (image.csf_volume / image.tiv_volume * 100) if image.tiv_volume else 0
+                    
+                    # 创建体积数据表格
+                    volume_data = [
+                        ["组织类型", "体积 (ml)", "占比 (%)"],
+                        ["灰质 (GM)", f"{image.gm_volume/1000:.2f}", f"{gm_percent:.1f}"],
+                        ["白质 (WM)", f"{image.wm_volume/1000:.2f}", f"{wm_percent:.1f}"],
+                        ["脑脊液 (CSF)", f"{image.csf_volume/1000:.2f}", f"{csf_percent:.1f}"],
+                        ["颅内总体积 (TIV)", f"{image.tiv_volume/1000:.2f}", "100.0"]
+                    ]
+                    
+                    volume_table = Table(volume_data, colWidths=[150, 100, 100])
+                    volume_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 10),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                    ]))
+                    
+                    elements.append(volume_table)
+                    elements.append(Spacer(1, 15))
+                    
+                    # 扫描日期信息
+                    scan_date = image.check_date.strftime("%Y-%m-%d") if image.check_date else "未知"
+                    elements.append(Paragraph(f"扫描日期: {scan_date}", styles['Normal']))
+                    elements.append(Spacer(1, 5))
+                    
+                    # 处理完成日期
+                    proc_date = image.processing_completed.strftime("%Y-%m-%d %H:%M") if image.processing_completed else "未知"
+                    elements.append(Paragraph(f"处理完成时间: {proc_date}", styles['Normal']))
+                    elements.append(Spacer(1, 20))
+                else:
+                    elements.append(Paragraph(f"图像 {idx+1}: {image.original_filename} - 未处理", styles['Heading3']))
+                    elements.append(Spacer(1, 10))
+        else:
+            elements.append(Paragraph("无图像数据", styles['Normal']))
+        
+        # 添加页脚
+        elements.append(Spacer(1, 30))
+        footer = Paragraph("本报告由脑MRI分析系统自动生成", styles['Normal'])
+        elements.append(footer)
+        
+        # 生成PDF
+        doc.build(elements)
+        logger.info(f"报告生成成功，保存至: {report_path}")
+        
+        # 返回PDF文件
+        return send_file(
+            report_path,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f"patient_report_{patient.name}.pdf"
+        )
+        
+    except Exception as e:
+        logger.error(f"生成报告失败: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'生成报告失败: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

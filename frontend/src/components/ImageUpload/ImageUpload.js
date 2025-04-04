@@ -109,9 +109,27 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
   // 获取患者列表
   useEffect(() => {
     if (!hidePatientSelect) {
+      console.log('开始获取患者列表...');
+      setPatientsLoading(true);
       fetchPatients();
     }
   }, [hidePatientSelect]);
+
+  // 添加处理URL中patient_id参数的效果
+  useEffect(() => {
+    // 尝试从URL参数中获取patient_id
+    const queryParams = new URLSearchParams(window.location.search);
+    const patientIdFromUrl = queryParams.get('patient_id');
+    
+    if (patientIdFromUrl) {
+      console.log('从URL中获取患者ID:', patientIdFromUrl);
+      const patientId = parseInt(patientIdFromUrl, 10);
+      setSelectedPatientState(patientId);
+      
+      // 设置表单值
+      form.setFieldsValue({ patient: patientId });
+    }
+  }, [form]);
 
   const fetchPatients = async () => {
     try {
@@ -123,18 +141,34 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
       }
       
       console.log('获取患者列表...');
+      setPatientsLoading(true);
+      
       const response = await axiosInstance.get('/api/patients');
       
       if (response.data.success && Array.isArray(response.data.patients)) {
-      setPatients(response.data.patients);
+        setPatients(response.data.patients);
         console.log('获取到', response.data.patients.length, '个患者');
+        setPatientsLoading(false);
+        
+        // 检查如果是从URL传入的patient_id，确保在获取患者列表后设置选中状态
+        const queryParams = new URLSearchParams(window.location.search);
+        const patientIdFromUrl = queryParams.get('patient_id');
+        
+        if (patientIdFromUrl) {
+          const patientId = parseInt(patientIdFromUrl, 10);
+          setSelectedPatientState(patientId);
+          form.setFieldsValue({ patient: patientId });
+          console.log('从URL设置患者选中状态:', patientId);
+        }
       } else {
         console.error('患者数据格式不正确:', response.data);
-      message.error('获取患者列表失败');
+        message.error('获取患者列表失败');
+        setPatientsLoading(false);
       }
     } catch (error) {
       console.error('获取患者列表错误:', error);
       message.error('获取患者列表失败');
+      setPatientsLoading(false);
       
       // 如果是未授权错误，重定向到登录页面
       if (error.response && error.response.status === 401) {
@@ -893,109 +927,120 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
   };
 
   const fetchResults = async (taskId) => {
-    if (!taskId) {
-      console.error("没有可用的任务ID");
-      return;
-    }
-
     try {
-      setProcessingState('获取结果');
-      updateProcessingLogs(prevLogs => [...prevLogs, `正在获取任务结果，任务ID: ${taskId}`]);
-      
-      const response = await axios.get(`${API_BASE}/api/tasks/${taskId}`);
-      
-      if (response.data.status === 'failed') {
-        console.error('处理失败:', response.data.error);
-        setTaskStatus('failed');
-        setTaskProgress(0);
-        setTaskError(response.data.error || '处理失败');
-        setProcessingState('失败');
+        console.log("尝试获取任务结果...");
         
-        updateProcessingLogs(prevLogs => [...prevLogs, `任务处理失败: ${response.data.error || '未知错误'}`]);
-        
-        return;
-      }
-      
-      if (response.data.status === 'completed' && response.data.results) {
-        console.log('处理结果:', response.data.results);
-        setTaskResults(response.data.results);
-        setTaskStatus('completed');
-        setTaskProgress(100);
-        setProcessingState('完成');
-        
-        updateProcessingLogs(prevLogs => [...prevLogs, '任务处理完成，获取结果成功']);
-        
-        // 使用任务ID设置图像URL
-        try {
-          // 使用fetchSegmentationImageData函数获取图像
-          updateProcessingLogs(prevLogs => [...prevLogs, '获取分割图像数据...']);
-          console.log('开始获取分割图像数据...');
-          
-          // 设置所有图像为加载中状态
-          setImageLoading({
-            gm: true,
-            wm: true,
-            csf: true
-          });
-          
-          // 并行获取三种组织的分割图像
-          const [gmData, wmData, csfData] = await Promise.all([
-            fetchSegmentationImageData(taskId, 'gm'),
-            fetchSegmentationImageData(taskId, 'wm'),
-            fetchSegmentationImageData(taskId, 'csf')
-          ]);
-          
-          console.log('分割图像数据获取状态:', { 
-            gm: !!gmData, 
-            wm: !!wmData, 
-            csf: !!csfData 
-          });
-          
-          // 设置分割图像
-          setSegmentImages({
-            gm: gmData,
-            wm: wmData,
-            csf: csfData
-          });
-          
-          // 更新加载状态
-          setImageLoading({
-            gm: false,
-            wm: false,
-            csf: false
-          });
-          
-          updateProcessingLogs(prevLogs => [
-            ...prevLogs, 
-            `分割图像获取完成: GM=${!!gmData}, WM=${!!wmData}, CSF=${!!csfData}`
-          ]);
-          
-        } catch (error) {
-          console.error('获取分割图像时出错:', error);
-          updateProcessingLogs(prevLogs => [...prevLogs, `获取分割图像时出错: ${error.message}`]);
-          
-          // 设置加载状态为false
-          setImageLoading({
-            gm: false,
-            wm: false,
-            csf: false
-          });
+        // 使用API服务获取结果
+        const response = await fetch(`${API_BASE}/api/tasks/${taskId}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`获取任务结果失败: ${response.status} - ${errorText}`);
+            throw new Error(`获取任务结果失败 (${response.status}): ${errorText}`);
         }
+
+        const data = await response.json();
+        console.log("获取任务结果成功:", data);
         
-        // 如果有回调函数，调用它
-        if (onUploadSuccess) {
-          onUploadSuccess(response.data.results);
+        // 更新状态
+        setTaskStatus(data.status || "completed");
+        
+        // 添加持久性标志，防止结果被清除
+        setProcessing(false);
+        
+        // 检查是否有结果
+        if (data.results) {
+            // 设置体积数据 - 确保保存结果，防止被清除
+            const volumeResults = {
+                gm_volume: data.results.gm_volume !== undefined ? data.results.gm_volume : null,
+                wm_volume: data.results.wm_volume !== undefined ? data.results.wm_volume : null,
+                csf_volume: data.results.csf_volume !== undefined ? data.results.csf_volume : null,
+                tiv_volume: data.results.tiv_volume !== undefined ? data.results.tiv_volume : null
+            };
+            
+            setVolumeData(volumeResults);
+            
+            // 记录体积数据到日志
+            updateProcessingLogs(prevLogs => [
+                ...prevLogs, 
+                '处理结果:', 
+                `- 灰质体积: ${volumeResults.gm_volume !== null ? (volumeResults.gm_volume / 1000).toFixed(2) : '未知'}ml`,
+                `- 白质体积: ${volumeResults.wm_volume !== null ? (volumeResults.wm_volume / 1000).toFixed(2) : '未知'}ml`,
+                `- 脑脊液体积: ${volumeResults.csf_volume !== null ? (volumeResults.csf_volume / 1000).toFixed(2) : '未知'}ml`,
+                `- 总颅内体积: ${volumeResults.tiv_volume !== null ? (volumeResults.tiv_volume / 1000).toFixed(2) : '未知'}ml`
+            ]);
+            
+            // 检查是否有图像路径
+            if (data.images) {
+                updateProcessingLogs(prevLogs => [...prevLogs, '正在加载分割图像...']);
+                
+                // 获取分割图像预览
+                const gmPromise = fetchSegmentationImageData(taskId, 'gm');
+                const wmPromise = fetchSegmentationImageData(taskId, 'wm');
+                const csfPromise = fetchSegmentationImageData(taskId, 'csf');
+                
+                // 等待所有图像加载完成
+                try {
+                    const [gm, wm, csf] = await Promise.all([gmPromise, wmPromise, csfPromise]);
+                    
+                    // 设置分割图像 - 使用函数式更新确保状态不被覆盖
+                    setSegmentImages({
+                        gm: gm,
+                        wm: wm,
+                        csf: csf
+                    });
+                    
+                    console.log("分割图像加载完成");
+                    updateProcessingLogs(prevLogs => [...prevLogs, '分割图像加载完成']);
+                } catch (imageError) {
+                    console.error("加载分割图像出错:", imageError);
+                    message.error("无法加载分割图像");
+                    updateProcessingLogs(prevLogs => [...prevLogs, `加载分割图像出错: ${imageError.message}`]);
+                }
+            }
+            
+            // 设置处理状态为完成 - 保留数据防止被清除
+            setProcessingStatus({
+                status: 'completed',
+                results: volumeResults,
+                taskId: taskId
+            });
+            
+            // 通知上层组件
+            if (onUploadSuccess) {
+                onUploadSuccess(uploadedImageId, data.results);
+            }
+            
+            message.success("处理完成！");
+        } else {
+            console.warn("未找到任务结果数据");
+            message.warning("任务处理完成，但未找到结果数据");
+            updateProcessingLogs(prevLogs => [...prevLogs, '警告: 未找到任务结果数据']);
         }
-      }
     } catch (error) {
-      console.error('获取任务结果时出错:', error);
-      updateProcessingLogs(prevLogs => [...prevLogs, `获取任务结果时出错: ${error.message}`]);
-      
-      setTaskStatus('failed');
-      setTaskError('获取结果失败: ' + (error.message || '未知错误'));
-      setProcessingState('失败');
+        console.error("获取任务结果时出错:", error);
+        message.error(`获取任务结果时出错: ${error.message}`);
+        updateProcessingLogs(prevLogs => [...prevLogs, `获取任务结果时出错: ${error.message}`]);
+        
+        // 设置处理状态为错误
+        setProcessingStatus(prev => ({
+            ...prev,
+            status: 'error',
+            error: error.message
+        }));
+        
+        // 标记处理已完成但出错
+        setProcessing(false);
     }
-  };
+    
+    // 注意：不要在这里清除轮询，让轮询逻辑自己决定何时停止
+};
   
   // 获取分割图像数据
   const fetchSegmentationImageData = async (taskId, type) => {
@@ -1096,9 +1141,11 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
             <Select
               style={{ width: '100%' }}
               placeholder="请选择患者"
-                  value={selectedPatientState}
-                  onChange={handlePatientChange}
+              value={selectedPatientState}
+              onChange={handlePatientChange}
               options={patients.map(p => ({ label: p.name, value: p.id }))}
+              loading={patientsLoading}
+              notFoundContent={patientsLoading ? <Spin size="small" /> : "没有找到患者"}
             />
             <Button 
               type="primary" 
@@ -1218,25 +1265,26 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
           </div>
         )}
           
-          {/* 处理结果显示 */}
-          {((processingStatus && processingStatus.status === 'success') || 
-            (typeof processingStatus === 'string' && processingStatus === 'success')) && volumeData && (
+          {/* 体积数据分析显示 */}
+          {volumeData && (
             <div className="results-section">
-              <h3>脑组织体积分析结果</h3>
+              <h3>脑组织体积分析</h3>
               <div className="volume-data">
                 <div className="volume-item gm-item">
                   <div className="volume-icon">
                     <svg viewBox="0 0 100 100" width="40" height="40">
-                      <circle cx="50" cy="50" r="45" fill="#91caff" />
+                      <circle cx="50" cy="50" r="45" fill="#1890ff" />
                       <text x="50" y="55" fontSize="20" fontWeight="bold" fill="#fff" textAnchor="middle">GM</text>
                     </svg>
                   </div>
                   <div className="volume-content">
-                    <div className="volume-label">灰质 (Gray Matter)</div>
+                    <div className="volume-label">灰质 (GM)</div>
                     <div className="volume-value">
-                      {volumeData.gm_volume.toFixed(2)} mm³
+                      {volumeData.gm_volume !== null ? volumeData.gm_volume.toFixed(2) : '未知'} mm³
                       <span className="volume-percent">
-                        ({((volumeData.gm_volume / volumeData.tiv_volume) * 100).toFixed(1)}%)
+                        {volumeData.gm_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                          ? `(${((volumeData.gm_volume / volumeData.tiv_volume) * 100).toFixed(1)}%)` 
+                          : ''}
                       </span>
                     </div>
                   </div>
@@ -1249,11 +1297,13 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
                     </svg>
                   </div>
                   <div className="volume-content">
-                    <div className="volume-label">白质 (White Matter)</div>
+                    <div className="volume-label">白质 (WM)</div>
                     <div className="volume-value">
-                      {volumeData.wm_volume.toFixed(2)} mm³
+                      {volumeData.wm_volume !== null ? volumeData.wm_volume.toFixed(2) : '未知'} mm³
                       <span className="volume-percent">
-                        ({((volumeData.wm_volume / volumeData.tiv_volume) * 100).toFixed(1)}%)
+                        {volumeData.wm_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                          ? `(${((volumeData.wm_volume / volumeData.tiv_volume) * 100).toFixed(1)}%)` 
+                          : ''}
                       </span>
                     </div>
                   </div>
@@ -1268,9 +1318,11 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
                   <div className="volume-content">
                     <div className="volume-label">脑脊液 (CSF)</div>
                     <div className="volume-value">
-                      {volumeData.csf_volume.toFixed(2)} mm³
+                      {volumeData.csf_volume !== null ? volumeData.csf_volume.toFixed(2) : '未知'} mm³
                       <span className="volume-percent">
-                        ({((volumeData.csf_volume / volumeData.tiv_volume) * 100).toFixed(1)}%)
+                        {volumeData.csf_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                          ? `(${((volumeData.csf_volume / volumeData.tiv_volume) * 100).toFixed(1)}%)` 
+                          : ''}
                       </span>
                     </div>
                   </div>
@@ -1285,9 +1337,11 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
                   <div className="volume-content">
                     <div className="volume-label">总颅内体积 (TIV)</div>
                     <div className="volume-value">
-                      {volumeData.tiv_volume.toFixed(2)} mm³
+                      {volumeData.tiv_volume !== null ? volumeData.tiv_volume.toFixed(2) : '未知'} mm³
                       <span className="volume-unit">
-                        ({(volumeData.tiv_volume / 1000).toFixed(2)} cm³)
+                        {volumeData.tiv_volume !== null 
+                          ? `(${(volumeData.tiv_volume / 1000).toFixed(2)} cm³)` 
+                          : ''}
                       </span>
                     </div>
                   </div>
@@ -1297,18 +1351,39 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
                 <div className="chart-bars">
                   <div 
                     className="chart-bar gm-bar" 
-                    style={{width: `${(volumeData.gm_volume / volumeData.tiv_volume) * 100}%`}}
-                    title={`灰质: ${((volumeData.gm_volume / volumeData.tiv_volume) * 100).toFixed(1)}%`}
+                    style={{
+                      width: volumeData.gm_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                        ? `${(volumeData.gm_volume / volumeData.tiv_volume) * 100}%` 
+                        : '0%'
+                    }}
+                    title={volumeData.gm_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                      ? `灰质: ${((volumeData.gm_volume / volumeData.tiv_volume) * 100).toFixed(1)}%` 
+                      : '灰质: 未知'
+                    }
                   ></div>
                   <div 
                     className="chart-bar wm-bar" 
-                    style={{width: `${(volumeData.wm_volume / volumeData.tiv_volume) * 100}%`}}
-                    title={`白质: ${((volumeData.wm_volume / volumeData.tiv_volume) * 100).toFixed(1)}%`}
+                    style={{
+                      width: volumeData.wm_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                        ? `${(volumeData.wm_volume / volumeData.tiv_volume) * 100}%` 
+                        : '0%'
+                    }}
+                    title={volumeData.wm_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                      ? `白质: ${((volumeData.wm_volume / volumeData.tiv_volume) * 100).toFixed(1)}%` 
+                      : '白质: 未知'
+                    }
                   ></div>
                   <div 
                     className="chart-bar csf-bar" 
-                    style={{width: `${(volumeData.csf_volume / volumeData.tiv_volume) * 100}%`}}
-                    title={`脑脊液: ${((volumeData.csf_volume / volumeData.tiv_volume) * 100).toFixed(1)}%`}
+                    style={{
+                      width: volumeData.csf_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                        ? `${(volumeData.csf_volume / volumeData.tiv_volume) * 100}%` 
+                        : '0%'
+                    }}
+                    title={volumeData.csf_volume !== null && volumeData.tiv_volume !== null && volumeData.tiv_volume > 0 
+                      ? `脑脊液: ${((volumeData.csf_volume / volumeData.tiv_volume) * 100).toFixed(1)}%` 
+                      : '脑脊液: 未知'
+                    }
                   ></div>
                 </div>
                 <div className="chart-legend">
@@ -1329,8 +1404,8 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
             </div>
           )}
           
-          {/* 分割图像显示 */}
-          {taskStatus === 'completed' && (
+          {/* 分割图像显示 - 修改条件确保正确显示 */}
+          {segmentImages && (segmentImages.gm || segmentImages.wm || segmentImages.csf) && (
             <div className="processed-images">
               <h3>脑组织分割图像</h3>
               <div className="images-grid">
@@ -1403,10 +1478,9 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
             </div>
           )}
           
-          {/* 处理成功但没有分割结果的情况 */}
-          {((processingStatus && processingStatus.status === 'success') || 
-             (typeof processingStatus === 'string' && processingStatus === 'success')) && 
-           Object.keys(processedImages || {}).length === 0 && (
+          {/* 处理成功但没有分割结果的情况 - 更新渲染条件 */}
+          {processingStatus && processingStatus.status === 'completed' && 
+           (!segmentImages || !(segmentImages.gm || segmentImages.wm || segmentImages.csf)) && (
             <Alert
               message="处理成功但未找到分割结果"
               description="CAT12处理完成，但未能生成分割图像。这可能是因为输入图像格式不兼容或分辨率不足。请尝试使用标准MRI T1文件。"
@@ -1416,13 +1490,12 @@ const ImageUpload = ({ selectedPatient, onUploadSuccess, hidePatientSelect, auto
             />
           )}
           
-          {/* 处理失败的情况 */}
-          {((processingStatus && processingStatus.status === 'failed') ||
-             (typeof processingStatus === 'string' && processingStatus === 'failed')) && (
+          {/* 处理失败的情况 - 更新渲染条件 */}
+          {processingStatus && processingStatus.status === 'failed' && (
             <Alert
               message="处理失败"
               description={
-                processingStatus && typeof processingStatus === 'object' && processingStatus.error ? 
+                processingStatus.error ? 
                 `图像处理失败: ${processingStatus.error}` :
                 "图像处理失败。这可能是因为图像格式不兼容、分辨率过低或服务器处理错误。请查看处理日志了解详情，并尝试使用标准T1加权MRI图像。"
               }

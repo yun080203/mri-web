@@ -1,6 +1,13 @@
 // API基础URL
 export const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
 
+// 空白1x1 PNG作为图像加载失败时的替代图像
+export const FALLBACK_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+// 上传相关常量
+export const ALLOWED_EXTENSIONS = ['.dcm', '.nii', '.nii.gz', '.img', '.hdr'];
+export const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+
 // 文件类型
 export const ACCEPTED_FILE_TYPES = {
     DICOM: '.dcm',

@@ -517,28 +517,45 @@
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+/* 图像加载错误样式 */
 .image-load-error {
     position: relative;
-    background-color: #f9f9f9;
-    border: 1px dashed #ccc;
+    border: 1px solid #ff4d4f;
     border-radius: 4px;
-    min-height: 150px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    overflow: hidden;
 }
 
 .error-overlay {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background-color: rgba(255, 77, 79, 0.8);
-    color: white;
-    padding: 4px 8px;
-    border-radius: 4px;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 77, 79, 0.2);
+    color: #ff4d4f;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     font-size: 14px;
-    white-space: nowrap;
+    font-weight: bold;
+    text-align: center;
+    z-index: 10;
+}
+
+.image-loading {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+    background-color: #f5f5f5;
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.image-loading p {
+    margin-top: 16px;
+    color: #1890ff;
 }
 
 .processing-status {
@@ -806,12 +823,13 @@
     background-color: #b7eb8f;
 }
 
+/* 分割结果图像样式 */
 .processed-images {
     margin-top: 20px;
-    border: 1px solid #f0f0f0;
+    padding: 15px;
+    background-color: #f9fbff;
     border-radius: 8px;
-    padding: 16px;
-    background-color: #fafafa;
+    border: 1px solid #d9e6f7;
 }
 
 .processed-images h3 {
@@ -820,54 +838,62 @@
     font-size: 16px;
     font-weight: 500;
     text-align: center;
+    border-bottom: 1px dashed #d9e6f7;
+    padding-bottom: 10px;
 }
 
-.images-grid {
+.processed-images .images-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 20px;
-    margin-top: 15px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
 }
 
-.image-item {
-    background-color: white;
-    border-radius: 8px;
-    overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    transition: transform 0.2s;
-    position: relative;
-}
-
-.image-item:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
-}
-
-.image-item h5 {
+.processed-images .image-item {
+    border: 1px solid #eaeaea;
+    border-radius: 6px;
     padding: 10px;
-    margin: 0;
+    background-color: white;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.processed-images .image-item:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+.processed-images .image-item h5 {
     text-align: center;
-    background-color: #f5f5f5;
-    border-bottom: 1px solid #eee;
+    font-size: 14px;
+    margin-bottom: 10px;
     color: #333;
     font-weight: 500;
 }
 
-.image-item img {
+.processed-images .preview-image {
     width: 100%;
-    height: auto;
-    display: block;
-    max-height: 300px;
+    height: 150px;
     object-fit: contain;
-    padding: 10px;
+    border-radius: 4px;
+    background-color: #f5f5f5;
+}
+
+/* 图像类型颜色标记 */
+.processed-images .image-item:nth-child(1) h5 {
+    color: #1890ff; /* 灰质颜色 */
+}
+
+.processed-images .image-item:nth-child(2) h5 {
+    color: #faad14; /* 白质颜色 */
+}
+
+.processed-images .image-item:nth-child(3) h5 {
+    color: #52c41a; /* 脑脊液颜色 */
 }
 
 @media (max-width: 768px) {
-    .volume-data {
+    .processed-images .images-grid {
         grid-template-columns: 1fr;
-    }
-    
-    .volume-value {
-        font-size: 16px;
     }
 } 

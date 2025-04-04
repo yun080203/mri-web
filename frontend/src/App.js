@@ -1,6 +1,6 @@
 import React, { useState, useReducer, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import DICOMViewer from './components/Viewer/DICOMViewer';
 import ImageViewer from './components/Viewer/ImageViewer';
 import ComparisonView from './components/Viewer/ComparisonView';
@@ -11,6 +11,8 @@ import PatientList from './components/Patient/PatientList';
 import PatientDetail from './components/Patient/PatientDetail';
 import ImageUpload from './components/ImageUpload/ImageUpload';
 import PatientEdit from './components/Patient/PatientEdit';
+import ImageCompare from './components/Image/ImageCompare';
+import Home from './components/Home/Home';
 import './styles/dicom.css';
 import './styles/App.css';
 import './styles/Image.css';
@@ -161,6 +163,7 @@ const MainApp = () => {
         gender: 'M'
     });
     const cancelTokenSource = useRef(null);
+    const location = useLocation();
     const navigate = useNavigate();
     const pollInterval = useRef(null);
     const [previewImage, setPreviewImage] = useState(null);
@@ -464,203 +467,134 @@ const MainApp = () => {
     const handleLogout = () => {
         localStorage.removeItem('token');
         authDispatch({ type: 'LOGOUT' });
-        window.location.href = '/login';
+        navigate('/login');
     };
 
+    // 检查当前路径是否为登录或注册页面
+    const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
+
+    if (isAuthPage) {
+        // 如果是登录或注册页面，只渲染内容区域
+        return (
+            <div className="app-container">
+                <div className="main-content">
+                    <Routes>
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/register" element={<Register />} />
+                        <Route path="*" element={<Navigate to="/login" />} />
+                    </Routes>
+                </div>
+            </div>
+        );
+    }
+
+    // 否则渲染带导航栏的页面
     return (
         <div className="app-container">
-            {localStorage.getItem('token') && (
-                <nav className="main-nav">
-                    <Link to="/">首页</Link>
-                    <Link to="/upload">上传图像</Link>
-                    <Link to="/patients">患者管理</Link>
-                    <Link to="/compare">图像对比</Link>
-                    <Link to="/data">数据管理</Link>
-                    <button onClick={handleLogout}>退出登录</button>
-                </nav>
-            )}
-
-            <main className="main-content">
+            <nav className="main-nav">
+                <Link to="/">首页</Link>
+                <Link to="/patients">患者管理</Link>
+                <Link to="/upload">上传图像</Link>
+                <Link to="/data">数据管理</Link>
+                <Link to="/compare">图像对比</Link>
+                <a href="#" onClick={(e) => {
+                    e.preventDefault();
+                    handleLogout();
+                }}>登出</a>
+            </nav>
+            <div className="main-content">
                 <Routes>
-                    <Route path="/login" element={
-                        localStorage.getItem('token') ? (
-                            <Navigate to="/" />
-                        ) : (
-                            <Login />
-                        )
-                    } />
-                    
-                    <Route path="/register" element={
-                        localStorage.getItem('token') ? (
-                            <Navigate to="/" />
-                        ) : (
-                            <Register />
-                        )
-                    } />
-                    
-                    <Route path="/" element={
-                        <ProtectedRoute>
-                            <div className="home-page">
-                                <h1>MRI图像处理系统</h1>
-                                <p>欢迎使用MRI图像处理系统，请选择以下功能：</p>
-                                <div className="feature-grid">
-                                    <Link to="/upload" className="feature-card">
-                                        <h3>上传图像</h3>
-                                        <p>上传并处理MRI图像</p>
-                                    </Link>
-                                    <Link to="/patients" className="feature-card">
-                                        <h3>患者管理</h3>
-                                        <p>管理患者信息和历史记录</p>
-                                    </Link>
-                                    <Link to="/compare" className="feature-card">
-                                        <h3>图像对比</h3>
-                                        <p>对比原始图像和处理结果</p>
-                                    </Link>
-                                    <Link to="/data" className="feature-card">
-                                        <h3>数据管理</h3>
-                                        <p>管理患者数据和报告</p>
-                                    </Link>
-                                </div>
-                            </div>
-                        </ProtectedRoute>
-                    } />
-                    
-                    <Route path="/upload" element={
-                        <ProtectedRoute>
-                            <div className="upload-page">
-                                <h2>上传MRI图像</h2>
-                                <div className="patient-section">
-                                    <h2>选择患者</h2>
-                                    <div className="patient-selector">
-                                        <select
-                                            value={selectedPatient ? selectedPatient.id : ''}
-                                            onChange={(e) => {
-                                                const patientId = parseInt(e.target.value, 10);
-                                                const patient = patients.find(p => p.id === patientId);
-                                                setSelectedPatient(patient);
-                                                setSelectedFile(null);
-                                                setUploadedImage(null);
-                                                setProcessingStatus(null);
-                                                setMatlabLog('');
-                                                setProcessedImages({});
-                                                setAnalysisResults(null);
-                                                setPreviewImage(null);
-                                            }}
-                                        >
-                                            <option value="">请选择患者</option>
-                                            {patients.map(patient => (
-                                                <option key={patient.id} value={patient.id}>
-                                                    {patient.name} (ID: {patient.patient_id})
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <button 
-                                            type="button"
-                                            onClick={() => {
-                                                setShowPatientModal(true);
-                                                setLoading(false);
-                                            }}
-                                            className="add-patient-btn"
-                                        >
-                                            添加新患者
-                                        </button>
-                                    </div>
-                                </div>
-                                <ImageUpload 
-                                    selectedPatient={selectedPatient ? selectedPatient.id : null}
-                                    onUploadSuccess={(data) => {
-                                        console.log('上传成功:', data);
-                                        setUploadedImage(data.image);
-                                        setProcessingStatus('uploaded');
-                                    }}
-                                    hidePatientSelect={true}
-                                />
-                            </div>
-                        </ProtectedRoute>
-                    } />
-                    
-                    <Route path="/patients" element={
-                        <ProtectedRoute>
-                            <PatientList />
-                        </ProtectedRoute>
-                    } />
-                    
-                    <Route path="/patients/:id" element={
-                        <ProtectedRoute>
-                            <PatientDetail />
-                        </ProtectedRoute>
-                    } />
-                    
-                    <Route path="/patients/new" element={<PatientEdit />} />
-                    <Route path="/patients/:id/edit" element={<PatientEdit />} />
-                    
-                    <Route path="/compare" element={
-                        <ProtectedRoute>
-                            <ComparisonView 
-                                originalImage={selectedFile ? URL.createObjectURL(selectedFile) : null}
-                                processedImage={state.result ? `${API_BASE}/uploads/${state.result}` : null}
-                            />
-                        </ProtectedRoute>
-                    } />
-                    
-                    <Route path="/data" element={
-                        <ProtectedRoute>
-                            <DataManager />
-                        </ProtectedRoute>
-                    } />
+                    <Route 
+                        path="/" 
+                        element={
+                            <ProtectedRoute>
+                                <Home />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/patients" 
+                        element={
+                            <ProtectedRoute>
+                                <PatientList />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/patients/:patientId" 
+                        element={
+                            <ProtectedRoute>
+                                <PatientDetail />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/patients/:patientId/edit" 
+                        element={
+                            <ProtectedRoute>
+                                <PatientEdit />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/upload" 
+                        element={
+                            <ProtectedRoute>
+                                <ImageUpload />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/upload/:patientId" 
+                        element={
+                            <ProtectedRoute>
+                                <ImageUpload />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/viewer/:imageId" 
+                        element={
+                            <ProtectedRoute>
+                                <ImageViewer />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/dicomviewer/:imageId" 
+                        element={
+                            <ProtectedRoute>
+                                <DICOMViewer />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/comparisonview/:imageIdA/:imageIdB" 
+                        element={
+                            <ProtectedRoute>
+                                <ComparisonView />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/compare" 
+                        element={
+                            <ProtectedRoute>
+                                <ImageCompare />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route 
+                        path="/data" 
+                        element={
+                            <ProtectedRoute>
+                                <DataManager />
+                            </ProtectedRoute>
+                        } 
+                    />
+                    <Route path="*" element={<Navigate to="/patients" />} />
                 </Routes>
-            </main>
-
-            {showPatientModal && (
-                <div className="modal">
-                    <div className="modal-content">
-                        <h3>添加新患者</h3>
-                        <div className="form-group">
-                            <label>姓名</label>
-                            <input
-                                type="text"
-                                value={newPatient.name}
-                                onChange={(e) => setNewPatient({...newPatient, name: e.target.value})}
-                                placeholder="请输入患者姓名"
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>患者ID</label>
-                            <input
-                                type="text"
-                                value={newPatient.patient_id}
-                                onChange={(e) => setNewPatient({...newPatient, patient_id: e.target.value})}
-                                placeholder="请输入患者ID"
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>年龄</label>
-                            <input
-                                type="number"
-                                value={newPatient.age}
-                                onChange={(e) => setNewPatient({...newPatient, age: e.target.value})}
-                                placeholder="请输入年龄"
-                                min="1"
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>性别</label>
-                            <select
-                                value={newPatient.gender}
-                                onChange={(e) => setNewPatient({...newPatient, gender: e.target.value})}
-                            >
-                                <option value="">请选择性别</option>
-                                <option value="M">男</option>
-                                <option value="F">女</option>
-                            </select>
-                        </div>
-                        <div className="modal-buttons">
-                            <button type="button" onClick={handleCreatePatient}>创建</button>
-                            <button type="button" onClick={() => setShowPatientModal(false)}>取消</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            </div>
         </div>
     );
 };

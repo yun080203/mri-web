@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
-import '../../styles/Auth.css';
-
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
+import { axiosInstance } from '../../utils/axiosConfig';
+import './Auth.css';
 
 function Register() {
     const [formData, setFormData] = useState({
@@ -45,24 +43,13 @@ function Register() {
 
             // 详细的调试日志
             console.log('准备发送的注册数据:', {
-                url: `${API_BASE}/api/auth/register`,
                 data: {
                     ...registerData,
                     password: '***' // 出于安全考虑不显示密码
                 }
             });
 
-            // 创建axios实例并设置headers
-            const registerAxios = axios.create({
-                baseURL: API_BASE,
-                timeout: 5000,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-            });
-
-            const response = await registerAxios.post('/api/auth/register', registerData);
+            const response = await axiosInstance.post('/api/auth/register', registerData);
             console.log('注册响应:', response.data);
 
             if (response.data.success) {

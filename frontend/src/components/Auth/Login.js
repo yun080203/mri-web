@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { axiosInstance } from '../../App';  // 导入配置好的 axiosInstance
+import { axiosInstance } from '../../utils/axiosConfig';  // 从正确的路径导入axiosInstance
 import './Auth.css';
 
 const Login = ({ onLogin }) => {

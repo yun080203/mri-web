@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link, useNavigate } from 'react-router-dom';
 import '../../styles/Patient.css';
+import { message } from 'antd';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
 
@@ -49,27 +50,48 @@ function PatientList() {
 
     const handleDelete = async (patientId) => {
         try {
+            console.log('开始删除患者:', patientId);
             const token = localStorage.getItem('token');
             if (!token) {
-                navigate('/login');
+                console.error('未找到token');
+                message.error('请先登录');
                 return;
             }
 
-            const response = await axios.delete(`${API_BASE}/api/patients/${patientId}`, {
+            console.log('发送删除请求...');
+            const response = await axios.delete(`${API_BASE}/api/patients/${patientId}/delete`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
                 }
             });
 
+            console.log('收到响应:', response.status);
+            console.log('响应数据:', response.data);
+
             if (response.data.success) {
-                // 从列表中移除已删除的患者
-                setPatients(patients.filter(patient => patient.id !== patientId));
+                console.log('删除成功，刷新列表...');
+                message.success('患者删除成功');
+                // 关闭确认对话框
+                setDeleteConfirm(null);
+                // 刷新患者列表
+                await fetchPatients();
+            } else {
+                console.error('删除失败:', response.data.error);
+                message.error(response.data.error || '删除失败');
+                // 关闭确认对话框
                 setDeleteConfirm(null);
             }
         } catch (error) {
             console.error('删除患者失败:', error);
-            setError(error.response?.data?.error || '删除患者失败');
+            if (error.response?.status === 401) {
+                navigate('/login');
+            } else {
+                message.error(error.response?.data?.error || '删除失败，请重试');
+            }
+            // 关闭确认对话框
+            setDeleteConfirm(null);
         }
     };
 
