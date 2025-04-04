@@ -4,30 +4,33 @@
   "main": "index.js",
   "scripts": {
     "start": "node --openssl-legacy-provider ./node_modules/react-scripts/scripts/start.js",
-    "build": "react-scripts build", 
+    "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "backend": "cd ../backend && python app.py"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "antd": "^5.15.0",
     "axios": "^1.8.1",
     "cornerstone-core": "^2.6.1",
     "cornerstone-tools": "^6.0.10",
     "cornerstone-web-image-loader": "^2.1.1",
     "dicom-parser": "^1.8.21",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "react-router-dom": "^6.30.0",
     "react-scripts": "^5.0.1",
-    "react-zoom-pan-pinch": "^3.7.0"
+    "react-zoom-pan-pinch": "^3.7.0",
+    "uuid": "^9.0.1"
   },
   "browserslist": {
     "production": [
       ">0.2%",
-      "not dead", 
+      "not dead",
       "not op_mini all"
     ],
     "development": [
